@@ -1,33 +1,21 @@
-#!/bin/sh
+#!/bin/bash
 
-# note: pass the version; but also change it in each of the setup scripts.
+# debugging lines
+# echo "RUNNING"
+# echo $PREFIX
+# pwd
+# ls -R
 
-version=$1
+mkdir -p "$PREFIX/bin"
 
-curl -L -O https://github.com/nion-software/nionswift-launcher/releases/download/$version/NionSwiftLauncher-Mac.zip
-curl -L -O https://github.com/nion-software/nionswift-launcher/releases/download/$version/NionSwiftLauncher-Linux.zip
-curl -L -O https://github.com/nion-software/nionswift-launcher/releases/download/$version/NionSwiftLauncher-Windows.zip
+if [ -e NionSwiftLauncher-Mac.zip ]
+then
+    unzip NionSwiftLauncher-Mac.zip -d "$PREFIX/bin"
+fi
 
-rm -rf dist
+if [ -e NionSwiftLauncher-Linux.zip ]
+then
+    unzip NionSwiftLauncher-Linux.zip -d "$PREFIX/bin/NionSwift"
+fi
 
-rm -rf nion/nionswift_tool/macosx build nionswift_tool.egg-info
-mkdir -p nion/nionswift_tool/macosx
-unzip NionSwiftLauncher-Mac.zip -d nion/nionswift_tool/macosx
-python setup_macos.py bdist_wheel --plat-name macosx-10.11-x86_64
-rm -rf nion/nionswift_tool/macosx
-
-rm -rf nion/nionswift_tool/linux build nionswift_tool.egg-info
-mkdir -p nion/nionswift_tool/linux
-unzip NionSwiftLauncher-Linux.zip -d nion/nionswift_tool/linux
-python setup_linux.py bdist_wheel --plat-name linux-x86_64
-rm -rf nion/nionswift_tool/linux
-
-rm -rf nion/nionswift_tool/windows build nionswift_tool.egg-info
-mkdir -p nion/nionswift_tool/windows
-unzip NionSwiftLauncher-Windows.zip -d nion/nionswift_tool/windows
-python setup_windows.py bdist_wheel --plat-name win-amd64
-rm -rf nion/nionswift_tool/windows
-
-rm -rf NionSwiftLauncher-Mac.zip
-rm -rf NionSwiftLauncher-Linux.zip
-rm -rf NionSwiftLauncher-Windows.zip
+python -m pip install --no-deps --ignore-installed .
