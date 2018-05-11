@@ -8,7 +8,7 @@ source:
   - path: setup.py
   - path: NionSwiftLauncher-Mac.zip  # [osx]
   - path: NionSwiftLauncher-Windows  # [win64]
-    folder: NionSwiftLauncher-Windows
+    folder: NionSwiftLauncher-Windows  # [win64]
   - path: NionSwiftLauncher-Linux.zip  # [linux64]
 
 build:
