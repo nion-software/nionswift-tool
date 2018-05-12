@@ -12,7 +12,7 @@ source:
   - path: NionSwiftLauncher-Linux.zip  # [linux64]
 
 build:
-  number: 0
+  number: 1
   include_recipe: False
   entry_points:
     - nionswift-tool = nion.nionswift_tool.command:main

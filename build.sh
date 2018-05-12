@@ -15,7 +15,7 @@ fi
 
 if [ -e NionSwiftLauncher-Linux.zip ]
 then
-    unzip NionSwiftLauncher-Linux.zip -d "$PREFIX/bin/NionSwift"
+    unzip NionSwiftLauncher-Linux.zip -d "$PREFIX/bin/NionSwiftLauncher"
 fi
 
 python -m pip install --no-deps --ignore-installed .
