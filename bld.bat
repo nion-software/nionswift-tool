@@ -3,7 +3,7 @@ REM Download NionSwiftLauncher-Windows.zip and unzip to directory NionSwiftLaunc
 move NionSwiftLauncher-Windows %SCRIPTS%\NionSwiftLauncher
 if errorlevel 1 exit 1
 
-move %SCRIPTS%\NionSwift\NionSwiftLauncher.exe %SCRIPTS%\NionSwiftLauncher\NionSwift.exe
+move %SCRIPTS%\NionSwiftLauncher\NionSwiftLauncher.exe %SCRIPTS%\NionSwiftLauncher\NionSwift.exe
 if errorlevel 1 exit 1
 
 %PYTHON% -m pip install --no-deps --ignore-installed .
