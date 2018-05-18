@@ -1,6 +1,6 @@
 package:
   name: 'nionswift-tool'
-  version: '0.3.14'
+  version: '0.3.16'
 
 source:
   - path: nion
@@ -12,7 +12,7 @@ source:
   - path: NionSwiftLauncher-Linux.zip  # [linux64]
 
 build:
-  number: 1
+  number: 0
   include_recipe: False
   entry_points:
     - nionswift-tool = nion.nionswift_tool.command:main
