@@ -9,6 +9,7 @@ setup(
     author='Nion Software Team',
     author_email='software@nion.com',
     description='Python command line access to Nion Swift Launcher',
+    install_requires=['pywin32;platform_system=="Windows"'],
     include_package_data=True,
     entry_points={
         'console_scripts': [
