@@ -2,7 +2,7 @@ from setuptools import setup
 
 setup(
     name='nionswift-tool',
-    version='0.3.17',
+    version='0.3.19',
     packages=["nion.nionswift_tool"],
     url='http://www.nion.com',
     license='Apache 2.0',
