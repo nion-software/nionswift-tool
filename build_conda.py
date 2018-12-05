@@ -24,7 +24,7 @@ build_dir = "conda_build"
 project = "nionswift-launcher"
 project_root = "NionSwiftLauncher"
 tool = "nionswift-tool"
-version = "0.3.19"
+version = "0.3.20"
 
 if sys.platform == "darwin":
     dir_path = f"{project_root}-Mac"
