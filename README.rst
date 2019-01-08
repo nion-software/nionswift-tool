@@ -1,4 +1,4 @@
-Nion Swfit Tool
+Nion Swift Tool
 ===============
 A high performance binary launcher for Nion Swift.
 
