@@ -3,7 +3,7 @@ set -e # fail script if any command fails
 if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then
   rm -rf dist
   rm -rf launcher/build/Release
-  xcodebuild -project launcher/NionUILauncher.xcodeproj -target "Nion UI Launcher" -configuration Release
+  xcodebuild -project launcher/NionUILauncher.xcodeproj -target "Nion Swift Launcher" -configuration Release
   rm -rf launcher/build/Release/*.dSYM
   python3 --version
   python3 setup.py bdist_wheel

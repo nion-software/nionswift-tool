@@ -48,5 +48,5 @@ deploy:
   file_glob: true
   prerelease: true
   on:
-    repo: nion-software/nionui-tool
+    repo: nion-software/nionswift-tool
     tags: true
