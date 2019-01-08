@@ -196,8 +196,8 @@
 			);
 			dependencies = (
 			);
-			name = "Nion UI Launcher";
-			productName = NionUILauncher;
+			name = "Nion Swift Launcher";
+			productName = NionSwiftLauncher;
 			productReference = FD840853160D11F600370586 /* Nion UI Launcher.app */;
 			productType = "com.apple.product-type.application";
 		};
@@ -317,7 +317,7 @@
 				GCC_PREFIX_HEADER = "NionUILauncher-Prefix.pch";
 				INFOPLIST_FILE = "$(SRCROOT)/NionUILauncher-Info.plist";
 				PRODUCT_BUNDLE_IDENTIFIER = com.nion.swift.launcher;
-				PRODUCT_NAME = "Nion Swift Launcher";
+				PRODUCT_NAME = "Nion Swift";
 				WRAPPER_EXTENSION = app;
 			};
 			name = Debug;
@@ -353,7 +353,7 @@
 				GCC_PREFIX_HEADER = "NionUILauncher-Prefix.pch";
 				INFOPLIST_FILE = "$(SRCROOT)/NionUILauncher-Info.plist";
 				PRODUCT_BUNDLE_IDENTIFIER = com.nion.swift.launcher;
-				PRODUCT_NAME = "Nion Swift Launcher";
+				PRODUCT_NAME = "Nion Swift";
 				WRAPPER_EXTENSION = app;
 			};
 			name = Release;
