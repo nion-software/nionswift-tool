@@ -1,6 +1,17 @@
 Changelog (nionswift-tool)
 ==========================
 
+0.3.22 (2018-04-27)
+-------------------
+
+- Implement high quality image drawing in most cases.
+
+- Do not auto expand when using min width/height. Simplifies layout.
+
+- Improve handling of virtual environments on Linux.
+
+- Qt version 5.12 on Windows.
+
 0.3.21 (2018-01-09)
 -------------------
 
