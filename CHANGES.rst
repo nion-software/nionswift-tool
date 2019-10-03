@@ -1,6 +1,13 @@
 Changelog (nionswift-tool)
 ==========================
 
+0.3.24 (UNRELEASED)
+-------------------
+
+- Qt version 5.13 on macOS and Windows.
+
+- Extend sizing policy support.
+
 0.3.23 (2019-05-02)
 -------------------
 
