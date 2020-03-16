@@ -20,7 +20,7 @@ before_install:
       # fi
       brew install qt5
       pip3 install numpy==1.15
-      sed -i '' 's/QTDIR = $(HOME)\/Developer\/Qt\/5.13.0\/clang_64/QTDIR = \/usr\/local\/opt\/qt5/g' launcher/xcconfig/targetReleaseNionUILauncher.xcconfig
+      sed -i '' 's/QTDIR = $(HOME)\/Developer\/Qt\/5.14\/clang_64/QTDIR = \/usr\/local\/opt\/qt5/g' launcher/xcconfig/targetReleaseNionUILauncher.xcconfig
       sed -i '' 's/PYTHONHOME = $(HOME)\/Developer\/miniconda43/PYTHONHOME = \/usr\/local\/opt\/python3\/Frameworks\/Python.framework\/Versions\/3.7/g' launcher/xcconfig/targetReleaseNionUILauncher.xcconfig
     fi
 
@@ -56,7 +56,10 @@ deploy:
   skip_cleanup: true
   api_key:
     secure: "TjtvdigepHd5ZalpMWJpnqVERjX3pDV04idrxg4XnwT2rnQ1XFkAtxzvxrkdMNWQyU0v3zS+gK/8ifVf9fb7EGsl30tZLJZFlcN3XoPaCFiwWBYlYc+NbJP1GAO4cj8rNQaiXtLA4e1ymMbqf3S/lfCiI6RJhufpKq+j1LtlHChg4TvnHvBoYyKuymYy29HFJAMWs1dHxUQPD1f9bepgTh7oPmcy3PsVZ3H/+OmmiNG5Niia3hYCErsVZiVRloHIVmQTFC+5iuzUhaDX9NkIz1ICxtNxINyuOqAh9awzdRS6g6IyFXuXl7HFXj7sW0af1pH6uGNh/bfVYAzPwRYtOFfLoKv8TWVw6sFEQOTr6U+F5y2WAmDkRV9lH6+yjD4SIZ6uesd5e9ii/7FOtGZpu000iJB744sZiy240i08H7tNSBiGLSoBZmT3UWunktLCQ2Ku00sCaw28ru1HvD5vZPHW4elPUGQ4KRVho/d2nIpDyGhAhjFChCt05B7haEPmqf9+4FwmdA3suGrueqbRrMosB3fAFtpNP0Cc9KNxx4QTt+zz863TVozvrAylvTa+O69SdQvbvPFSwP9Xc4qvufigaqY4/CuEpIQdnIZoP10LBTQefbhIghYLmPLFYQy0o9aA4EMs/8YgGweHvaesBwgQud0ps0NXzOoO3hXmJHE="
-  file: dist/*.whl
+  file:
+    - dist/*.whl
+    - launcher/build/Release/LauncherApp.tar.gz  # [osx]
+    - launcher/launcher_app.tar.gz  # [linux]
   file_glob: true
   prerelease: true
   on:

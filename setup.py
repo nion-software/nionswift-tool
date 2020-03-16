@@ -4,7 +4,7 @@ import setuptools
 import sys
 
 tool_id = "nionswift"
-version = "0.3.25"
+version = "0.4.1"
 launcher = "NionSwiftLauncher"
 
 
@@ -67,9 +67,15 @@ class bdist_wheel(bdist_wheel_):
         elif self.root_is_pure:
             plat_name = 'any'
         else:
-            plat_name = self.plat_name or get_platform()
+            # macosx contains system version in platform name so need special handle
+            if self.plat_name and not self.plat_name.startswith("macosx"):
+                plat_name = self.plat_name
+            else:
+                plat_name = get_platform(self.bdist_dir)
+
             if plat_name in ('linux-x86_64', 'linux_x86_64') and sys.maxsize == 2147483647:
                 plat_name = 'linux_i686'
+
         plat_name = plat_name.replace('-', '_').replace('.', '_')
 
         if self.root_is_pure:
@@ -91,6 +97,7 @@ class bdist_wheel(bdist_wheel_):
             abi_tag = self.abi_tag
             tag = (impl, abi_tag, plat_name)
             supported_tags = get_supported(
+                self.bdist_dir,
                 supplied_platform=plat_name if self.plat_name_supplied else None)
             # XXX switch to this alternate implementation for non-pure:
             if not self.py_limited_api:
@@ -134,12 +141,11 @@ setuptools.setup(
     name=f"{tool_id}-tool",
     version=version,
     packages=[f"nion.{tool_id}_tool"],
-    url='http://www.nion.com',
+    url=f"https://github.com/nion-software/{tool_id}-tool",
     license='Apache-2.0',
     author='Nion Software Team',
     author_email='software@nion.com',
     description='Python command line access to Nion Swift Launcher',
-    include_package_data=True,
     entry_points={
         'console_scripts': [
             f"{tool_id}-tool=nion.{tool_id}_tool.command:main",

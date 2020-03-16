@@ -7,7 +7,10 @@
 
 #include <QtCore/QAbstractListModel>
 #include <QtCore/QDateTime>
+#include <QtCore/QElapsedTimer>
 #include <QtCore/QMutex>
+#include <QtCore/QQueue>
+#include <QtCore/QRunnable>
 #include <QtCore/QThread>
 #include <QtCore/QWaitCondition>
 #include <QtGui/QDrag>
@@ -240,6 +243,18 @@ public:
 
 typedef QMap<int, PaintImageCacheEntry> PaintImageCache;
 
+class LayerCacheEntry
+{
+public:
+    LayerCacheEntry() { }
+    LayerCacheEntry(int layer_seed, QSharedPointer<QImage> layer_image, const QRect &layer_rect) : layer_seed(layer_seed), layer_image(layer_image), layer_rect(layer_rect) { }
+    int layer_seed;
+    QSharedPointer<QImage> layer_image;
+    QRect layer_rect;
+};
+
+typedef QMap<int, LayerCacheEntry> LayerCache;
+
 struct CanvasDrawingCommand
 {
     QString command;
@@ -259,11 +274,18 @@ private:
 
 void PaintCommands(QPainter &painter, const QList<CanvasDrawingCommand> &commands, PaintImageCache *image_cache = NULL, float display_scaling = 0.0);
 
-typedef QPair<QTransform, QDateTime> RenderedTimeStamp;
+struct RenderedTimeStamp
+{
+    RenderedTimeStamp(const QTransform &transform, const QDateTime &dateTime, int section_id) : transform(transform), dateTime(dateTime), section_id(section_id) { }
+
+    QTransform transform;
+    QDateTime dateTime;
+    int section_id;
+};
 
 typedef QList<RenderedTimeStamp> RenderedTimeStamps;
 
-RenderedTimeStamps PaintBinaryCommands(QPainter &painter, const std::vector<quint32> commands, const QMap<QString, QVariant> &imageMap, PaintImageCache *image_cache, float display_scaling = 0.0);
+RenderedTimeStamps PaintBinaryCommands(QPainter *painter, const std::vector<quint32> commands, const QMap<QString, QVariant> &imageMap, PaintImageCache *image_cache, LayerCache *layer_cache, float display_scaling = 0.0, int section_id = 0);
 
 class PyStyledItemDelegate : public QStyledItemDelegate
 {
@@ -467,28 +489,56 @@ private:
 
 class PyCanvas;
 
-class PyCanvasRenderThread : public QThread
+class CanvasSection
+{
+public:
+    int m_section_id;
+    QMutex m_mutex;
+    QList<CanvasDrawingCommand> m_commands;
+    std::vector<quint32> m_commands_binary;
+    QRect rect;
+    QRect image_rect;
+    QSharedPointer<QImage> image;
+    PaintImageCache m_image_cache;
+    LayerCache m_layer_cache;
+    QMap<QString, QVariant> m_imageMap;
+    RenderedTimeStamps m_rendered_timestamps;
+    bool rendering;
+    quint64 time;
+    QMutex latenciesMutex;
+    QQueue<qint64> latencies;
+};
+
+struct QRectOptional
+{
+    QRectOptional(const QRect &rect) : value(rect), has_value(true) { }
+    QRectOptional() : has_value(false) { }
+
+    QRect value;
+    bool has_value;
+};
+
+class PyCanvasRenderTaskSignals : public QObject
 {
     Q_OBJECT
 
-public:
-    PyCanvasRenderThread(PyCanvas *canvas, QWaitCondition &render_request, QMutex &render_request_mutex);
-
-    void cancel() { m_cancel = true; }
-    void needsRender() { m_needs_render = true; }
-
 Q_SIGNALS:
-    void renderingReady();
+    void renderingReady(const QRect &repaint_rect);
+};
 
-protected:
+class PyCanvasRenderTask : public QRunnable
+{
+public:
+    PyCanvasRenderTask(PyCanvas *canvas);
+    ~PyCanvasRenderTask();
+
+    PyCanvasRenderTaskSignals *signals() const { return m_signals; }
+
     virtual void run() override;
 
 private:
     PyCanvas *m_canvas;
-    QWaitCondition &m_render_request;
-    QMutex &m_render_request_mutex;
-    bool m_cancel;
-    bool m_needs_render;
+    PyCanvasRenderTaskSignals *m_signals;
 };
 
 class PyCanvas : public QWidget
@@ -529,32 +579,32 @@ public:
     void setCommands(const QList<CanvasDrawingCommand> &commands);
     void setBinaryCommands(const std::vector<quint32> &commands, const QMap<QString, QVariant> &imageMap);
 
+    void setBinarySectionCommands(int section_id, const std::vector<quint32> &commands, const QRect &rect, const QMap<QString, QVariant> &imageMap);
+    void removeSection(int section_id);
+
     void grabMouse0(const QPoint &gp);
     void releaseMouse0();
 
-    void render();
+    QRectOptional renderOne();
+    QRectOptional renderSection(QSharedPointer<CanvasSection> section);
+    void wakeRenderer();
 
 private Q_SLOTS:
     void renderingFinished();
+    void repaintRect(const QRect &rect);
 
 private:
     QVariant m_py_object;
-    PyCanvasRenderThread *m_thread;
-    QMutex m_rendered_image_mutex;
-    QImage m_rendered_image;
-    RenderedTimeStamps m_rendered_timestamps;
     QMap<QDateTime, QDateTime> m_known_dts;
-    QWaitCondition m_render_request;
-    QMutex m_render_request_mutex;
     QMutex m_commands_mutex;
     QList<CanvasDrawingCommand> m_commands;
-    QMap<QString, QVariant> m_imageMap;
+    QMap<int, QSharedPointer<CanvasSection>> m_sections;
     std::vector<quint32> m_commands_binary;
     QPoint m_last_pos;
     bool m_pressed;
-    PaintImageCache m_image_cache;
     unsigned m_grab_mouse_count;
     QPoint m_grab_reference_point;
+    QElapsedTimer m_timer;
 };
 
 QWidget *Widget_makeIntrinsicWidget(const QString &intrinsic_id);

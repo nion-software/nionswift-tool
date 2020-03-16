@@ -1,10 +1,10 @@
 version: '#{build}'
-image: Visual Studio 2017
+image: Visual Studio 2019
 platform: x64
 configuration: Release
 
 environment:
-  QT_BASE_X64: C:\Qt\5.13\msvc2017_64
+  QT_BASE_X64: C:\Qt\5.14\msvc2017_64
   PYTHON3_BASE_X64: C:\Miniconda36-x64
   global:
     TWINE_USERNAME: cmeyer
@@ -25,7 +25,10 @@ after_build:
   - cmd: "%PYTHON3_BASE_X64%\\python.exe setup.py bdist_wheel"
 
 artifacts:
-- path: dist\*.whl
+  - path: dist\*.whl
+  - path: launcher\x64\Release
+    name: LauncherAppWindows
+    type: zip
 
 deploy:
   provider: GitHub
