@@ -8,7 +8,7 @@ if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then
   rm -rf launcher/build/Release/*.dSYM
   pushd launcher/build/Release
   echo "Zipping..."
-  tar zcf LauncherApp.tar.gz Nion\ Swift\ Launcher.app
+  tar zcf LauncherApp.tar.gz Nion\ Swift.app
   pwd
   ls -l
   popd
