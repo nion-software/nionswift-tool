@@ -1192,7 +1192,11 @@ void PaintCommands(QPainter &painter, const QList<CanvasDrawingCommand> &command
             QString text = args[0].toString();
             QPointF text_pos(args[1].toFloat() * display_scaling, args[2].toFloat() * display_scaling);
             QFontMetrics fm(text_font);
+#if QT_VERSION >= QT_VERSION_CHECK(5,11,0)
+            int text_width = fm.horizontalAdvance(text);
+#else
             int text_width = fm.width(text);
+#endif
             if (text_align == 2 || text_align == 5) // end or right
                 text_pos.setX(text_pos.x() - text_width);
             else if (text_align == 4) // center
@@ -1924,7 +1928,11 @@ RenderedTimeStamps PaintBinaryCommands(QPainter *rawPainter, const std::vector<q
                 read_float(commands, command_index); // max width
                 QPointF text_pos(arg1, arg2);
                 QFontMetrics fm(text_font);
+#if QT_VERSION >= QT_VERSION_CHECK(5,11,0)
+                int text_width = fm.horizontalAdvance(text);
+#else
                 int text_width = fm.width(text);
+#endif
                 if (text_align == 2 || text_align == 5) // end or right
                     text_pos.setX(text_pos.x() - text_width);
                 else if (text_align == 4) // center
@@ -2096,7 +2104,11 @@ RenderedTimeStamps PaintBinaryCommands(QPainter *rawPainter, const std::vector<q
                 QPointF text_pos(12, 12);
                 QFont text_font = QFontDatabase::systemFont(QFontDatabase::FixedFont);
                 QFontMetrics fm(text_font);
+#if QT_VERSION >= QT_VERSION_CHECK(5,11,0)
+                int text_width = fm.horizontalAdvance(text);
+#else
                 int text_width = fm.width(text);
+#endif
                 int text_ascent = fm.ascent();
                 int text_height = fm.height();
                 QPainterPath background;
@@ -2227,6 +2239,7 @@ void PyCanvasRenderTask::run()
 PyCanvas::PyCanvas()
     : m_pressed(false)
     , m_grab_mouse_count(0)
+    , m_rendering_count(0)
 {
     setMouseTracking(true);
     setAcceptDrops(true);
@@ -2236,6 +2249,13 @@ PyCanvas::PyCanvas()
 
 PyCanvas::~PyCanvas()
 {
+    QMutexLocker locker(&m_rendering_count_mutex);
+    while (m_rendering_count > 0)
+    {
+        m_rendering_count_mutex.unlock();
+        QThread::msleep(1);
+        m_rendering_count_mutex.lock();
+    }
 }
 
 void PyCanvas::repaintRect(const QRect &repaintRect)
@@ -2269,8 +2289,27 @@ void PyCanvas::focusOutEvent(QFocusEvent *event)
     QWidget::focusOutEvent(event);
 }
 
+class RenderCounter
+{
+    QMutex *m;
+    int &rendering_count;
+public:
+    RenderCounter(QMutex *m, int &rendering_count) : m(m), rendering_count(rendering_count)
+    {
+        QMutexLocker locker(m);
+        rendering_count += 1;
+    }
+    ~RenderCounter()
+    {
+        QMutexLocker locker(m);
+        rendering_count -= 1;
+    }
+};
+
 QRectOptional PyCanvas::renderOne()
 {
+    RenderCounter render_counter(&m_rendering_count_mutex, m_rendering_count);
+
     QList<QSharedPointer<CanvasSection>> sections;
 
     {
@@ -2422,7 +2461,11 @@ void PyCanvas::paintEvent(QPaintEvent *event)
             text += " [" + QString::number(latencyAverage) + "]";
         QFont text_font = QFontDatabase::systemFont(QFontDatabase::FixedFont);
         QFontMetrics fm(text_font);
+#if QT_VERSION >= QT_VERSION_CHECK(5,11,0)
+        int text_width = fm.horizontalAdvance(text);
+#else
         int text_width = fm.width(text);
+#endif
         int text_ascent = fm.ascent();
         int text_height = fm.height();
         QPointF text_pos(12, 12 + text_height + 16);
@@ -3852,7 +3895,7 @@ std::string getLayoutItemInfo(QLayoutItem* item)
         char buf[1024];
         snprintf(buf, 1023, " SpacerItem hint (%d x %d) policy: %s constraint: ss\n",
                  hint.width(), hint.height(),
-#if QT_VERSION >= 0x050500
+#if QT_VERSION >= QT_VERSION_CHECK(5,5,0)
                  toString(si->sizePolicy()).c_str()
 #else
                  ""
