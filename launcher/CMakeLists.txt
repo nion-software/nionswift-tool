@@ -13,8 +13,8 @@
 
 cmake_minimum_required(VERSION 3.12)
 
-set(APP_NAME "NionUILauncher")
-set(APP_VERSION "0.4.1")
+set(APP_NAME "NionSwiftLauncher")
+set(APP_VERSION "0.4.2")
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/build)
 
@@ -66,7 +66,7 @@ if (${CMAKE_SYSTEM_NAME} MATCHES "Linux")
     add_custom_command(
       TARGET ${PROJECT_NAME} POST_BUILD
       COMMAND chrpath -r $ORIGIN:$ORIGIN/../../lib
-        $<TARGET_FILE_DIR:${PROJECT_NAME}>/NionUILauncher VERBATIM)
+        $<TARGET_FILE_DIR:${PROJECT_NAME}>/${APP_NAME} VERBATIM)
 
     add_custom_command(
       TARGET ${PROJECT_NAME} POST_BUILD
@@ -156,10 +156,10 @@ endif()
 # Mac Specific
 if (${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
 
-    set(APP_EXECUTABLE "Nion UI Launcher")
+    set(APP_EXECUTABLE "Nion Swift")
     set(CMAKE_OSX_DEPLOYMENT_TARGET 10.11)
-    set(MACOSX_BUNDLE_BUNDLE_NAME "Nion UI Launcher")
-    set(MACOSX_BUNDLE_GUI_IDENTIFIER "com.nion.ui.launcher")
+    set(MACOSX_BUNDLE_BUNDLE_NAME ${APP_EXECUTABLE})
+    set(MACOSX_BUNDLE_GUI_IDENTIFIER "com.nion.swift.launcher")
     set(MACOSX_BUNDLE_ICON_FILE "MacIcons.icns")
     #set(MACOSX_BUNDLE_SHORT_VERSION_STRING ${APP_VERSION})
     set(MACOSX_BUNDLE_COPYRIGHT "Copyright © 2012-2020 Nion Company. All rights reserved.")
