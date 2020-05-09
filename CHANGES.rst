@@ -1,6 +1,11 @@
 Changelog (nionswift-tool)
 ==========================
 
+0.4.4 (2020-05-08)
+------------------
+- Add color/font methods to eliminate need for stylesheet properties.
+- Fix issues with arcTo drawing.
+
 0.4.3 (2020-04-10)
 ------------------
 - Add window style and widget attribute methods.
