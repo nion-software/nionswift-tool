@@ -446,6 +446,26 @@ static PyObject *Application_close(PyObject * /*self*/, PyObject *args)
     return PythonSupport::instance()->getNoneReturnValue();
 }
 
+static PyObject *Application_setQuitOnLastWindowClosed(PyObject * /*self*/, PyObject *args)
+{
+    Q_UNUSED(args)
+
+    if (qApp->thread() != QThread::currentThread())
+    {
+        PythonSupport::instance()->setErrorString("Must be called on UI thread.");
+        return NULL;
+    }
+
+    bool value = false;
+
+    if (!PythonSupport::instance()->parse()(args, "b", &value))
+        return NULL;
+
+    qApp->setQuitOnLastWindowClosed(value);
+
+    return PythonSupport::instance()->getNoneReturnValue();
+}
+
 static PyObject *ButtonGroup_addButton(PyObject * /*self*/, PyObject *args)
 {
     Q_UNUSED(args)
@@ -1413,6 +1433,28 @@ static PyObject *Core_syncLatencyTimer(PyObject * /*self*/, PyObject *args)
     timer_offset_ns = value * 1E9 - timer.nsecsElapsed();
 
     return QVariantToPyObject(timer.nsecsElapsed());
+}
+
+static PyObject *Core_truncateToWidth(PyObject * /*self*/, PyObject *args)
+{
+    char *font_c = NULL;
+    char *text_c = NULL;
+    int pixel_width = 0;
+    int mode = 0;
+    if (!PythonSupport::instance()->parse()(args, "szii", &font_c, &text_c, &pixel_width, &mode))
+        return NULL;
+
+    float display_scaling = GetDisplayScaling();
+
+    QString text = (text_c != NULL) ? text_c : QString();
+
+    QFont font = ParseFontString(font_c, display_scaling);
+
+    QFontMetrics font_metrics(font);
+
+    QString truncated_str = font_metrics.elidedText(text, Qt::TextElideMode(mode), pixel_width);
+
+    return PythonSupport::instance()->build()("s", truncated_str.toUtf8().data());
 }
 
 static PyObject *Core_URLToPath(PyObject * /*self*/, PyObject *args)
@@ -5679,13 +5721,18 @@ void Application::output(const QString &str)
 
 Application::Application(int & argv, char **args)
     : QApplication(argv, args)
-    , m_quit_on_last_window(false)
 {
     timer.start();
 
+    // this default is wrong and should be removed once all applications
+    // are calling setQuitOnLastWindowClosed explicitly with false.
+    // the problem with having this true is that there is no way to have
+    // the application determine quit behavior on last window unless the
+    // lastWindowClosed event is connected to should_quit on the application.
+    // and that cannot prevent a quit; only confirm it. so setQuitOnLastWindowClosed
+    // should be false so that it can be controlled by the lastWindowClosed
+    // event instead.
     setQuitOnLastWindowClosed(true);
-
-    connect(this, SIGNAL(lastWindowClosed()), this, SLOT(continueQuit()));
 
     connect(this, SIGNAL(aboutToQuit()), this, SLOT(aboutToQuit()));
 
@@ -5712,6 +5759,7 @@ static PyMethodDef Methods[] = {
     {"Action_setEnabled", Action_setEnabled, METH_VARARGS, "Action_setEnabled."},
     {"Action_setTitle", Action_setTitle, METH_VARARGS, "Action_setTitle."},
     {"Application_close", Application_close, METH_VARARGS, "Application_close."},
+    {"Application_setQuitOnLastWindowClosed", Application_setQuitOnLastWindowClosed, METH_VARARGS, "Application_setQuitOnLastWindowClosed."},
     {"ButtonGroup_addButton", ButtonGroup_addButton, METH_VARARGS, "ButtonGroup_addButton."},
     {"ButtonGroup_connect", ButtonGroup_connect, METH_VARARGS, "ButtonGroup_connect."},
     {"ButtonGroup_checkedButton", ButtonGroup_checkedButton, METH_VARARGS, "ButtonGroup_checkedButton."},
@@ -5750,6 +5798,7 @@ static PyMethodDef Methods[] = {
     {"Core_readImageToBinary", Core_readImageToBinary, METH_VARARGS, "Core_readImageToBinary."},
     {"Core_setApplicationInfo", Core_setApplicationInfo, METH_VARARGS, "Core_setApplicationInfo."},
     {"Core_syncLatencyTimer", Core_syncLatencyTimer, METH_VARARGS, "Core_syncLatencyTimer"},
+    {"Core_truncateToWidth", Core_truncateToWidth, METH_VARARGS, "Core_truncateToWidth."},
     {"Core_URLToPath", Core_URLToPath, METH_VARARGS, "Core_URLToPath."},
     {"Core_writeBinaryToImage", Core_writeBinaryToImage, METH_VARARGS, "Core_writeBinaryToImage."},
     {"DockWidget_connect", DockWidget_connect, METH_VARARGS, "DockWidget_connect."},
@@ -5994,12 +6043,6 @@ void Application::deinitialize()
     PythonSupport::deinitInstance();
 }
 
-void Application::continueQuit()
-{
-    if (m_quit_on_last_window)
-        quit();
-}
-
 void Application::aboutToQuit()
 {
     invokePyMethod(m_py_application, "stop", QVariantList());
@@ -6013,6 +6056,11 @@ QString Application::resourcesPath() const
 #if defined(Q_OS_WIN) || defined(Q_OS_LINUX)
     return qApp->applicationDirPath()+"/";
 #endif
+}
+
+bool Application::hasPyMethod(const QVariant &object, const QString &method)
+{
+    return PythonSupport::instance()->hasPyMethod(object, method);
 }
 
 QVariant Application::invokePyMethod(const QVariant &object, const QString &method, const QVariantList &args)
