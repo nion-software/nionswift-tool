@@ -14,6 +14,7 @@
 #include <QtCore/QMetaType>
 #include <QtCore/QMimeData>
 #include <QtCore/QProcessEnvironment>
+#include <QtCore/QRegularExpression>
 #include <QtCore/QSettings>
 #include <QtCore/QStandardPaths>
 #include <QtCore/QThread>
@@ -24,6 +25,7 @@
 #include <QtGui/QImageReader>
 #include <QtGui/QImageWriter>
 #include <QtGui/QPainter>
+#include <QtGui/QPixmap>
 #include <QtGui/QScreen>
 #include <QtGui/QWindow>
 
@@ -5721,6 +5723,7 @@ void Application::output(const QString &str)
 
 Application::Application(int & argv, char **args)
     : QApplication(argv, args)
+    , m_splash_screen(nullptr)
 {
     timer.start();
 
@@ -5740,6 +5743,13 @@ Application::Application(int & argv, char **args)
     setApplicationName(APP_NAME);
     setOrganizationName(ORGANIZATION_NAME);
     setOrganizationDomain(ORGANIZATION_DOMAIN);
+
+    QPixmap pixmap(resourcesPath() + "/splash.png");
+    if (!pixmap.isNull())
+    {
+        m_splash_screen = new QSplashScreen(pixmap);
+        m_splash_screen->show();
+    }
 
     // TODO: Handle case where python home contains no dylib/dll.
     // TODO: Handle case where python home contains wrong version of python.
@@ -5987,47 +5997,118 @@ PyObject* InitializeHostLibModule()
 
 bool Application::initialize()
 {
+    if (arguments().length() < 2 || !QDir(arguments()[1]).exists())
+    {
+        // try reading the config file
+        QDir base_dir(QCoreApplication::applicationDirPath());
+        QString config_file_path = base_dir.absoluteFilePath("toolconfig.toml");
+        QFile config_file(config_file_path);
+        if (config_file.open(QIODevice::ReadOnly))
+        {
+            QTextStream in(&config_file);
+            QString section;
+            while (!in.atEnd())
+            {
+                QString line = in.readLine();
+
+                if (line.startsWith("#"))
+                    continue;
+
+                if (line.startsWith("["))
+                    section = line.replace(QRegExp("\\[([A-Za-z9-0_-]+)\\]"), "\\1");
+
+                if (section == "python" && line.startsWith("home = "))
+                {
+                    line.replace("home = ", "");
+                    line.replace("\"", "");
+                    if (QDir(line).isAbsolute())
+                        m_python_home = QDir(line).absolutePath();
+                    else
+                        m_python_home = line == "." ? QCoreApplication::applicationDirPath() : QDir(QCoreApplication::applicationDirPath()).absoluteFilePath(line);
+                }
+
+                if (section == "python" && line.startsWith("library_name = "))
+                {
+                    line.replace("library_name = ", "");
+                    m_python_library = QDir(m_python_home).absoluteFilePath(line.replace("\"", ""));
+                }
+
+                if (section == "python" && line.startsWith("paths = "))
+                {
+                    line.replace("paths = ", "");
+                    line.replace("[", "");
+                    line.replace("]", "");
+                    line.replace("\"", "");
+                    Q_FOREACH(const QString &path, line.split(", "))
+                    {
+                        if (QDir(line).isAbsolute())
+                            m_python_paths.append(QDir(path).absolutePath());
+                        else
+                            m_python_paths.append(path == "." ? m_python_home : QDir(m_python_home).absoluteFilePath(path));
+                    }
+                }
+
+                if (section == "app" && line.startsWith("identifier = "))
+                {
+                    line.replace("identifier = ", "");
+                    m_python_app = line.replace("\"", "");
+                }
+            }
+        }
+
+        m_python_paths.append(m_python_home);
+    }
+
     m_python_home = PythonSupport::ensurePython(m_python_home);
 #if !defined(DEBUG)
     if (m_python_home.isEmpty() || !QFile(m_python_home).exists())
         return false;
 #endif
 
-    PythonSupport::initInstance(m_python_home);
+    PythonSupport::initInstance(m_python_home, m_python_library);
 
-    PythonSupport::instance()->initializeModule("HostLib", &InitializeHostLibModule);
-
-    PythonSupport::instance()->initialize(m_python_home);  // initialize Python support
-
-    QString bootstrap_error;
-
+    if (PythonSupport::instance()->isValid())
     {
-        Python_ThreadBlock thread_block;
+        PythonSupport::instance()->initializeModule("HostLib", &InitializeHostLibModule);
 
-        // Add the resources path so that the Python imports work. This is necessary to find bootstrap.py,
-        // which may not be in the same directory as the executable (specifically for Mac OS where things
-        // are arranged into a bundle).
-        PythonSupport::instance()->addResourcePath(resourcesPath());
+        PythonSupport::instance()->initialize(m_python_home, m_python_paths, m_python_library);  // initialize Python support
 
-        // Bootstrap the python stuff.
-        PyObject *module = PythonSupport::instance()->import("bootstrap");
-        PythonSupport::instance()->printAndClearErrors();
-        m_bootstrap_module = PyObjectToQVariant(module); // new reference
-        PythonSupport::instance()->printAndClearErrors();
-        QVariant bootstrap_result = invokePyMethod(m_bootstrap_module, "bootstrap_main", QVariantList() << arguments());
-        m_py_application = bootstrap_result.toList()[0];
-        bootstrap_error = bootstrap_result.toList()[1].toString();
+        QString bootstrap_error;
 
-        if (!m_py_application.isNull())
-            return invokePyMethod(m_py_application, "start", QVariantList()).toBool();
+        {
+            Python_ThreadBlock thread_block;
+
+            // Add the resources path so that the Python imports work. This is necessary to find bootstrap.py,
+            // which may not be in the same directory as the executable (specifically for Mac OS where things
+            // are arranged into a bundle).
+            PythonSupport::instance()->addResourcePath(resourcesPath());
+
+            // Bootstrap the python stuff.
+            PyObject *module = PythonSupport::instance()->import("bootstrap");
+            PythonSupport::instance()->printAndClearErrors();
+            m_bootstrap_module = PyObjectToQVariant(module); // new reference
+            PythonSupport::instance()->printAndClearErrors();
+            QVariantList args;
+            if (m_python_app.isEmpty())
+                args << arguments();
+            else
+                args << (QStringList() << arguments()[0] << m_python_home << m_python_app);
+            QVariant bootstrap_result = invokePyMethod(m_bootstrap_module, "bootstrap_main", args);
+            m_py_application = bootstrap_result.toList()[0];
+            bootstrap_error = bootstrap_result.toList()[1].toString();
+
+            if (!m_py_application.isNull())
+                return invokePyMethod(m_py_application, "start", QVariantList()).toBool();
+        }
+
+        if (bootstrap_error == "python36" || bootstrap_error == "python37")
+        {
+            QMessageBox::critical(nullptr, "Unable to Launch", "Unable to launch Python application (requires Python 3.7 or later).\n\n" + m_python_home + "\n\nCheck the Python path passed on the command line or shortcut.");
+        }
     }
-
-    if (bootstrap_error == "python36")
+    else
     {
-        QDir dir(QStandardPaths::writableLocation(QStandardPaths::DataLocation));
-        QString data_location = dir.absolutePath();
-        QString config_file_path = QDir(data_location).absoluteFilePath("PythonConfig.ini");
-        QMessageBox::critical(nullptr, "Unable to Launch", "Unable to launch Python application (requires Python 3.6 or later).\n\n" + m_python_home + "\n\nCheck the Python path passed on the command line or shortcut; or try removing the file at\n\n" + config_file_path);
+        qCritical() << "Unable to find Python.";
     }
 
 //    deinitialize();  // not functional yet (numpy and importlib both cause failures).
@@ -6081,4 +6162,13 @@ QVariant Application::getPyObjectAttribute(const QVariant &object, const QString
 QVariant Application::dispatchPyMethod(const QVariant &object, const QString &method, const QVariantList &args)
 {
     return invokePyMethod(m_bootstrap_module, "bootstrap_dispatch", QVariantList() << object << method << QVariant(args));
+}
+
+void Application::closeSplashScreen()
+{
+    if (m_splash_screen)
+    {
+        m_splash_screen->close();
+        m_splash_screen = nullptr;
+    }
 }

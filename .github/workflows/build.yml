@@ -1,0 +1,371 @@
+name: Build
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+env:
+  tool-id: nionswift-tool
+
+jobs:
+  build_linux:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-18.04]
+        python-version: [3.7, 3.8]
+    steps:
+    - uses: actions/checkout@v2
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v1
+      with:
+        python-version: ${{ matrix.python-version }}
+    - name: Display Python version
+      shell: bash
+      run: |
+        python -c "import sys; print(sys.version)"
+        python -c "import sys; print(sys.executable)"
+    - name: Build
+      shell: bash
+      run: |
+        sudo apt-get install qt5-default -y
+        python -m pip install --upgrade pip
+        python -m pip install install wheel
+        python -m pip install install packaging
+        python -m pip install install numpy
+        pushd launcher
+        PYTHON=`python -c "import sys; print(sys.executable, end='')"`
+        cmake CMakeLists.txt -DPython3_EXECUTABLE="$PYTHON" -DUSE_PYTHON_QT=OFF
+        cmake --build . --config Release
+        mkdir -p linux
+        mv build linux/x64
+        popd
+        python setup.py bdist_wheel
+    - name: Set up Miniconda ${{ matrix.python-version }}
+      uses: conda-incubator/setup-miniconda@v1
+      with:
+        auto-update-conda: true
+        python-version: ${{ matrix.python-version }}
+    - name: Build Conda Package
+      shell: bash -l {0}
+      run: |
+        python -c "import sys; print(sys.version)"
+        python -c "import sys; print(sys.executable)"
+        conda install conda-build -y
+        conda build ./.github/workflows/recipe
+    - name: Upload Wheel
+      uses: actions/upload-artifact@v2
+      with:
+        name: ${{ env.tool-id }}-linux-whl-${{ matrix.python-version }}
+        path: dist/*.whl
+    - name: Upload Conda Package
+      uses: actions/upload-artifact@v2
+      with:
+        name: ${{ env.tool-id }}-linux-conda-${{ matrix.python-version }}
+        path: /usr/share/miniconda/envs/test/conda-bld/linux-64/*.tar.bz2
+  build_macos:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [macos-10.15]
+        python-version: [3.7, 3.8]
+    steps:
+    - uses: actions/checkout@v2
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v1
+      with:
+        python-version: ${{ matrix.python-version }}
+    - name: Display Python version
+      shell: bash
+      run: |
+        python -c "import sys; print(sys.version)"
+        python -c "import sys; print(sys.executable)"
+    - name: Install Qt
+      uses: jurplel/install-qt-action@v2
+      with:
+        version: '5.15.1'
+        host: 'mac'
+        target: 'desktop'
+    - name: Build
+      shell: bash
+      run: |
+        python -m pip install --upgrade pip
+        python -m pip install install packaging
+        python -m pip install install numpy
+        pushd launcher
+        PYTHON=`python -c "import sys; print(sys.executable, end='')"`
+        cmake CMakeLists.txt -DPython3_EXECUTABLE="$PYTHON"
+        cmake --build . --config Release
+        mkdir -p build/Release
+        mv build/*.app build/Release
+        popd
+        python setup.py bdist_wheel
+    - name: Set up Miniconda ${{ matrix.python-version }}
+      uses: conda-incubator/setup-miniconda@v1
+      with:
+        auto-update-conda: true
+        python-version: ${{ matrix.python-version }}
+    - name: Build Conda Package
+      shell: bash -l {0}
+      run: |
+        python -c "import sys; print(sys.version)"
+        python -c "import sys; print(sys.executable)"
+        conda install conda-build -y
+        conda build ./.github/workflows/recipe
+    - name: Upload Wheel
+      uses: actions/upload-artifact@v2
+      with:
+        name: ${{ env.tool-id }}-macos-whl-${{ matrix.python-version }}
+        path: dist/*.whl
+    - name: Upload Conda Package
+      uses: actions/upload-artifact@v2
+      with:
+        name: ${{ env.tool-id }}-macos-conda-${{ matrix.python-version }}
+        path: /usr/local/miniconda/envs/test/conda-bld/osx-64/*.tar.bz2
+  build_win:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [windows-2019]
+        python-version: [3.7, 3.8]
+    steps:
+    - uses: actions/checkout@v2
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v1
+      with:
+        python-version: ${{ matrix.python-version }}
+    - name: Display Python version
+      shell: pwsh
+      run: |
+        python -c "import sys; print(sys.version)"
+        python -c "import sys; print(sys.executable)"
+    - name: Install Qt
+      uses: jurplel/install-qt-action@v2
+      with:
+        version: '5.15.1'
+        host: 'windows'
+        target: 'desktop'
+        arch: 'win64_msvc2019_64'
+    - name: Build
+      shell: pwsh
+      run: |
+        python -m pip install --upgrade pip
+        pip install packaging
+        pip install numpy
+        pushd launcher
+        $PYTHON_EXEC = python -c "import sys; print(sys.executable, end='')"
+        cmake CMakeLists.txt -DPython3_EXECUTABLE="$PYTHON_EXEC"
+        cmake --build . --config Release
+        Get-ChildItem -Include *.pdb -Recurse | foreach { $_.Delete() }
+        Get-ChildItem build\Release\imageformats -Include *d.dll -Recurse | foreach { $_.Delete() }
+        Remove-Item -Recurse -Force x64\*
+        Move-Item -Path build\Release -Destination x64
+        popd
+        python setup.py bdist_wheel
+    - name: Set up Miniconda ${{ matrix.python-version }}
+      uses: conda-incubator/setup-miniconda@v1
+      with:
+        auto-update-conda: true
+        python-version: ${{ matrix.python-version }}
+    - name: Build Conda Package
+      shell: pwsh
+      run: |
+        python -c "import sys; print(sys.version)"
+        python -c "import sys; print(sys.executable)"
+        conda install conda-build -y
+        conda build ./.github/workflows/recipe
+    - name: Upload Wheel
+      uses: actions/upload-artifact@v2
+      with:
+        name: ${{ env.tool-id }}-win-whl-${{ matrix.python-version }}
+        path: dist\*.whl
+    - name: Upload Conda Package
+      uses: actions/upload-artifact@v2
+      with:
+        name: ${{ env.tool-id }}-win-conda-${{ matrix.python-version }}
+        path: C:\Miniconda\envs\test\conda-bld\win-64\*.tar.bz2
+  test_linux:
+    needs: build_linux
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-18.04, ubuntu-20.04]
+        python-version: [3.7, 3.8]
+    steps:
+    - uses: actions/checkout@v2
+    - name: Download Wheel
+      uses: actions/download-artifact@v2
+      id: download_wheel
+      with:
+        name: ${{ env.tool-id }}-linux-whl-${{ matrix.python-version }}
+        path: downloads
+    - name: Download Conda
+      uses: actions/download-artifact@v2
+      id: download_conda
+      with:
+        name: ${{ env.tool-id }}-linux-conda-${{ matrix.python-version }}
+        path: conda_downloads
+    - name: Set up Python ${{ matrix.python-version }} with official build
+      uses: actions/setup-python@v1
+      with:
+        python-version: ${{ matrix.python-version }}
+    - name: Virtual screen
+      shell: bash
+      run: |
+        sudo apt-get install xvfb -y
+    - name: Test system Python installed with official build with virtual environment
+      shell: bash
+      run: |
+        sudo apt-get install qt5-default -y
+        python -m pip install --upgrade pip
+        SYSTEM_PYTHON_EXE=python
+        $SYSTEM_PYTHON_EXE -m venv test_venv
+        source test_venv/bin/activate
+        python -m pip install wheel
+        python -m pip install packaging
+        python -m pip install nionui
+        python -m pip install ${{steps.download_wheel.outputs.download-path}}/*.whl
+        pushd nionui_app_test
+        python setup.py develop
+        popd
+        xvfb-run nionui nionui_app.test_ack | grep ACK
+    - name: Set up Miniconda ${{ matrix.python-version }}
+      uses: conda-incubator/setup-miniconda@v1
+      with:
+        auto-update-conda: true
+        python-version: ${{ matrix.python-version }}
+    - name: Test Conda
+      shell: bash -l {0}
+      run: |
+        conda install -y -c nion nionui wheel packaging
+        conda install -y ${{steps.download_conda.outputs.download-path}}/*.tar.bz2
+        pushd nionui_app_test
+        python setup.py develop
+        popd
+        xvfb-run nionui nionui_app.test_ack | grep ACK
+  test_macos:
+    needs: build_macos
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [macos-10.15]
+        python-version: [3.7, 3.8]
+    steps:
+    - uses: actions/checkout@v2
+    - name: Download Wheel
+      uses: actions/download-artifact@v2
+      id: download_wheel
+      with:
+        name: ${{ env.tool-id }}-macos-whl-${{ matrix.python-version }}
+        path: downloads
+    - name: Download Conda
+      uses: actions/download-artifact@v2
+      id: download_conda
+      with:
+        name: ${{ env.tool-id }}-macos-conda-${{ matrix.python-version }}
+        path: conda_downloads
+    - name: Test system Python installed with brew with virtual environment
+      shell: bash
+      run: |
+        SYSTEM_PYTHON_EXE=/usr/local/opt/python@${{ matrix.python-version }}/bin/python3
+        $SYSTEM_PYTHON_EXE -m venv test_venv
+        source test_venv/bin/activate
+        python -m pip install wheel
+        python -m pip install packaging
+        python -m pip install nionui
+        python -m pip install ${{steps.download_wheel.outputs.download-path}}/*.whl
+        pushd nionui_app_test
+        python setup.py develop
+        popd
+        nionui nionui_app.test_ack | grep ACK
+    - name: Set up Python ${{ matrix.python-version }} with official build
+      uses: actions/setup-python@v1
+      with:
+        python-version: ${{ matrix.python-version }}
+    - name: Test system Python installed with official build with virtual environment
+      shell: bash
+      run: |
+        SYSTEM_PYTHON_EXE=python3
+        $SYSTEM_PYTHON_EXE -m venv test_venv
+        source test_venv/bin/activate
+        python -m pip install wheel
+        python -m pip install packaging
+        python -m pip install nionui
+        python -m pip install ${{steps.download_wheel.outputs.download-path}}/*.whl
+        pushd nionui_app_test
+        python setup.py develop
+        popd
+        nionui nionui_app.test_ack | grep ACK
+    - name: Set up Miniconda ${{ matrix.python-version }}
+      uses: conda-incubator/setup-miniconda@v1
+      with:
+        auto-update-conda: true
+        python-version: ${{ matrix.python-version }}
+    - name: Test Conda
+      shell: bash -l {0}
+      run: |
+        conda install -y -c nion nionui wheel packaging
+        conda install -y ${{steps.download_conda.outputs.download-path}}/*.tar.bz2
+        pushd nionui_app_test
+        python setup.py develop
+        popd
+        nionui nionui_app.test_ack | grep ACK
+  test_win:
+    needs: build_win
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [windows-2019]
+        python-version: [3.7, 3.8]
+    steps:
+    - uses: actions/checkout@v2
+    - name: Download Wheel
+      uses: actions/download-artifact@v2
+      id: download_wheel
+      with:
+        name: ${{ env.tool-id }}-win-whl-${{ matrix.python-version }}
+        path: downloads
+    - name: Download Conda
+      uses: actions/download-artifact@v2
+      id: download_conda
+      with:
+        name: ${{ env.tool-id }}-win-conda-${{ matrix.python-version }}
+        path: conda_downloads
+    - name: Set up Python ${{ matrix.python-version }} with official build
+      uses: actions/setup-python@v1
+      with:
+        python-version: ${{ matrix.python-version }}
+    - name: Test system Python installed with official build with virtual environment
+      shell: pwsh
+      run: |
+        python -m pip install --upgrade pip
+        python -m venv test_venv
+        test_venv\Scripts\activate
+        python -m pip install wheel
+        python -m pip install packaging
+        python -m pip install nionui
+        $filename = Get-ChildItem -name ${{steps.download_wheel.outputs.download-path}}\*.whl
+        python -m pip install ${{steps.download_wheel.outputs.download-path}}\$filename
+        pushd nionui_app_test
+        python setup.py develop
+        popd
+        nionui nionui_app.test_ack | grep ACK
+        deactivate
+    - name: Set up Miniconda ${{ matrix.python-version }}
+      uses: conda-incubator/setup-miniconda@v1
+      with:
+        auto-update-conda: true
+        python-version: ${{ matrix.python-version }}
+    - name: Test Conda
+      shell: pwsh
+      run: |
+        conda install -y -c nion nionui wheel packaging
+        $filename = Get-ChildItem -name ${{steps.download_conda.outputs.download-path}}\*.tar.bz2
+        conda install -y ${{steps.download_conda.outputs.download-path}}\$filename
+        pushd nionui_app_test
+        python setup.py develop
+        popd
+        nionui nionui_app.test_ack
+        nionui nionui_app.test_ack | grep ACK
