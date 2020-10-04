@@ -6,6 +6,7 @@ import sys
 def launch(args):
     parser = argparse.ArgumentParser(description="Launch Nion Swift using native Qt front end.")
     parser.add_argument("--alias",  dest="alias", action="store_true", help="create a desktop alias")
+    parser.add_argument("--app",  dest="app", action="store", help="override app package", default="nionui_app.nionswift")
     parser.add_argument("args", nargs=argparse.REMAINDER)
     parsed_args = parser.parse_args()
 
@@ -19,7 +20,7 @@ def launch(args):
             filename = desktop_path + "\\Nion Swift " + stamp + ".lnk"
             base = pythoncom.CoCreateInstance(shell.CLSID_ShellLink, None, pythoncom.CLSCTX_INPROC_SERVER, shell.IID_IShellLink)
             base.SetPath(os.path.join(sys.exec_prefix, "Scripts", "NionSwiftLauncher", "NionSwift.exe"))
-            base.SetArguments(str(os.sys.prefix) + " nionui_app.nionswift")
+            base.SetArguments(str(sys.prefix) + " nionui_app.nionswift")
             base.SetDescription("Nion Swift Shortcut")
             base.SetWorkingDirectory(os.path.join(sys.exec_prefix, "Scripts", "NionSwiftLauncher"))
             print("Writing Nion Swift shortcut to " + filename)
@@ -34,8 +35,8 @@ def launch(args):
         else:
             exe_path = None
         if exe_path:
-            python_prefix = os.sys.prefix
-            proc = subprocess.Popen([exe_path, python_prefix, "nionui_app.nionswift"] + parsed_args.args, universal_newlines=True)
+            python_prefix = sys.prefix
+            proc = subprocess.Popen([exe_path, python_prefix, parsed_args.app] + parsed_args.args, universal_newlines=True)
             proc.communicate()
 
 def main():
