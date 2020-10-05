@@ -22,8 +22,7 @@
 
 #include <QtGui/QFontDatabase>
 #include <QtGui/QPainter>
-
-#include <QtSvg/QSvgWidget>
+#include <QtGui/QPainterPath>
 
 #include <QtWidgets/QAction>
 #include <QtWidgets/QCheckBox>
@@ -110,6 +109,8 @@ void DocumentWindow::showEvent(QShowEvent *show_event)
     application()->dispatchPyMethod(m_py_object, "aboutToShow", QVariantList());
 
     setFocus();
+
+    application()->closeSplashScreen();
 }
 
 void DocumentWindow::resizeEvent(QResizeEvent *event)

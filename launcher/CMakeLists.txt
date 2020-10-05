@@ -13,8 +13,11 @@
 
 cmake_minimum_required(VERSION 3.12)
 
+option(USE_CONSOLE "Enable console" ON)
+option(USE_PYTHON_QT "Enable Python Qt" ON)
+
 set(APP_NAME "NionSwiftLauncher")
-set(APP_VERSION "0.4.5")
+set(APP_VERSION "0.4.6")
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/build)
 
@@ -63,10 +66,12 @@ set(RESOURCE_FILES
 if (${CMAKE_SYSTEM_NAME} MATCHES "Linux")
     target_link_libraries(${APP_NAME} ${CMAKE_DL_LIBS})
 
-    add_custom_command(
-      TARGET ${PROJECT_NAME} POST_BUILD
-      COMMAND chrpath -r $ORIGIN:$ORIGIN/../../lib
-        $<TARGET_FILE_DIR:${PROJECT_NAME}>/${APP_NAME} VERBATIM)
+    if (${USE_PYTHON_QT})
+        add_custom_command(
+          TARGET ${PROJECT_NAME} POST_BUILD
+          COMMAND chrpath -r $ORIGIN:$ORIGIN/../../lib
+            $<TARGET_FILE_DIR:${PROJECT_NAME}>/${APP_NAME} VERBATIM)
+    endif()
 
     add_custom_command(
       TARGET ${PROJECT_NAME} POST_BUILD
@@ -101,8 +106,13 @@ endif()
 
 # Windows Specific
 if (${CMAKE_SYSTEM_NAME} MATCHES "Windows")
-    set_target_properties(${APP_NAME} PROPERTIES LINK_FLAGS "/LTCG")
+    if (${USE_CONSOLE})
+        set_target_properties(${APP_NAME} PROPERTIES LINK_FLAGS "/LTCG")
+    else()
+        set_target_properties(${APP_NAME} PROPERTIES LINK_FLAGS "/LTCG /SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup")
+    endif()
 
+    target_sources(${APP_NAME} PRIVATE Application.rc)
     target_sources(${APP_NAME} PRIVATE Graphics/WinIcon.ico)
 
     add_custom_command(
@@ -160,7 +170,7 @@ if (${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
     set(CMAKE_OSX_DEPLOYMENT_TARGET 10.11)
     set(MACOSX_BUNDLE_BUNDLE_NAME ${APP_EXECUTABLE})
     set(MACOSX_BUNDLE_GUI_IDENTIFIER "com.nion.swift.launcher")
-    set(MACOSX_BUNDLE_ICON_FILE "MacIcons.icns")
+    set(MACOSX_BUNDLE_ICON_FILE "MacIcon.icns")
     #set(MACOSX_BUNDLE_SHORT_VERSION_STRING ${APP_VERSION})
     set(MACOSX_BUNDLE_COPYRIGHT "Copyright © 2012-2020 Nion Company. All rights reserved.")
     # mark the icons file as part of the sources
