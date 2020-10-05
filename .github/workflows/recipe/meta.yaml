@@ -1,4 +1,4 @@
-{% set name = "nionui-tool" %}
+{% set name = "nionswift-tool" %}
 {% set version = "0.4.6" %}
 
 package:
@@ -9,7 +9,7 @@ build:
   number: 6
   skip: true  # [py2k or python_impl == 'pypy']
   entry_points:
-    - nionui-tool = nion.nionui_tool.command:main
+    - nionswift-tool = nion.nionswift_tool.command:main
   binary_relocation: false
   ignore_prefix_files: true
   detect_binary_files_with_prefix: false
@@ -28,15 +28,15 @@ requirements:
 
 test:
   commands:
-    - test -f "$PREFIX/bin/nionui-tool"  # [osx]
-    - test -f "$PREFIX/bin/Nion UI Launcher.app/Contents/MacOS/Nion UI Launcher"  # [osx]
-    - test -f "$PREFIX/bin/Nion UI Launcher.app/Contents/Resources/bootstrap.py"  # [osx]
-    - test -f "$PREFIX/bin/nionui-tool"  # [linux]
-    - test -f "$PREFIX/bin/NionUILauncher/NionUILauncher"  # [linux]
-    - test -f "$PREFIX/bin/NionUILauncher/bootstrap.py"  # [linux]
-    - if not exist "%PREFIX%\\Scripts\\nionui-tool.exe" exit 1  # [win]
-    - if not exist "%PREFIX%\\Scripts\\NionUILauncher\\NionUILauncher.exe" exit 1  # [win]
-    - if not exist "%PREFIX%\\Scripts\\NionUILauncher\\bootstrap.py" exit 1  # [win]
+    - test -f "$PREFIX/bin/nionswift-tool"  # [osx]
+    - test -f "$PREFIX/bin/Nion Swift.app/Contents/MacOS/Nion UI Launcher"  # [osx]
+    - test -f "$PREFIX/bin/Nion Swift.app/Contents/Resources/bootstrap.py"  # [osx]
+    - test -f "$PREFIX/bin/nionswift-tool"  # [linux]
+    - test -f "$PREFIX/bin/NionSwiftLauncher/NionSwiftLauncher"  # [linux]
+    - test -f "$PREFIX/bin/NionSwiftLauncher/bootstrap.py"  # [linux]
+    - if not exist "%PREFIX%\\Scripts\\nionswift-tool.exe" exit 1  # [win]
+    - if not exist "%PREFIX%\\Scripts\\NionSwiftLauncher\\NionSwiftLauncher.exe" exit 1  # [win]
+    - if not exist "%PREFIX%\\Scripts\\NionSwiftLauncher\\bootstrap.py" exit 1  # [win]
 
 about:
   home: http://github.com/nion-software/{{ name }}
