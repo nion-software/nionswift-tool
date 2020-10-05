@@ -162,6 +162,7 @@ jobs:
         cmake --build . --config Release
         Get-ChildItem -Include *.pdb -Recurse | foreach { $_.Delete() }
         Get-ChildItem build\Release\imageformats -Include *d.dll -Recurse | foreach { $_.Delete() }
+        Rename-Item -Path build\Release\NionUILauncher.exe -NewName NionSwift.exe
         Remove-Item -Recurse -Force x64\*
         Move-Item -Path build\Release -Destination x64
         popd

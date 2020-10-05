@@ -29,7 +29,7 @@ requirements:
 test:
   commands:
     - test -f "$PREFIX/bin/nionswift-tool"  # [osx]
-    - test -f "$PREFIX/bin/Nion Swift.app/Contents/MacOS/Nion UI Launcher"  # [osx]
+    - test -f "$PREFIX/bin/Nion Swift.app/Contents/MacOS/Nion Swift"  # [osx]
     - test -f "$PREFIX/bin/Nion Swift.app/Contents/Resources/bootstrap.py"  # [osx]
     - test -f "$PREFIX/bin/nionswift-tool"  # [linux]
     - test -f "$PREFIX/bin/NionSwiftLauncher/NionSwiftLauncher"  # [linux]
