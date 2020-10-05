@@ -35,7 +35,7 @@ test:
     - test -f "$PREFIX/bin/NionSwiftLauncher/NionSwiftLauncher"  # [linux]
     - test -f "$PREFIX/bin/NionSwiftLauncher/bootstrap.py"  # [linux]
     - if not exist "%PREFIX%\\Scripts\\nionswift-tool.exe" exit 1  # [win]
-    - if not exist "%PREFIX%\\Scripts\\NionSwiftLauncher\\NionSwiftLauncher.exe" exit 1  # [win]
+    - if not exist "%PREFIX%\\Scripts\\NionSwiftLauncher\\NionSwift.exe" exit 1  # [win]
     - if not exist "%PREFIX%\\Scripts\\NionSwiftLauncher\\bootstrap.py" exit 1  # [win]
 
 about:
