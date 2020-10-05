@@ -1,11 +1,11 @@
-{% set name = "nionui-tool" %}
+{% set name = "nionswift-tool" %}
 {% set version = "0.4.6" %}
-{% set macos_app = "Nion UI Launcher" %}
-{% set app_dir = "NionUILauncher" %}
-{% set macos_exe = "Nion UI Launcher" %}
-{% set linux_exe = "NionUILauncher" %}
-{% set win_exe = "NionUILauncher" %}
-{% set summary = "A native launcher for Nion UI apps." %}
+{% set macos_app = "Nion Swift" %}
+{% set app_dir = "NionSwiftLauncher" %}
+{% set macos_exe = "Nion Swift" %}
+{% set linux_exe = "NionSwiftLauncher" %}
+{% set win_exe = "NionSwift" %}
+{% set summary = "A native launcher for Nion Swift." %}
 
 {% set name_u = name|replace('-', '_') %}
 
