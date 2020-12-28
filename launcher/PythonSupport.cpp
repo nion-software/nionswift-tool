@@ -32,7 +32,7 @@
 #include "PythonSupport.h"
 #include "PythonStubs.h"
 
-#define NPY_NO_DEPRECATED_API NPY_1_7_API_VERSION
+#define NPY_NO_DEPRECATED_API NPY_1_19_API_VERSION
 #define PY_ARRAY_UNIQUE_SYMBOL d2af2aa3297e
 
 #pragma push_macro("_DEBUG")
@@ -214,7 +214,7 @@ PythonSupport::PythonSupport(const QString &python_home, const QString &python_l
             directories << home_dir.absoluteFilePath("../lib") << "/usr/local/Cellar/python@" + version_str;
 
             QStringList variants;
-            variants << "libpython3.8.dylib" << "libpython3.7m.dylib";
+            variants << "libpython3.9.dylib" << "libpython3.8.dylib" << "libpython3.7m.dylib";
 
             Q_FOREACH(const QString &directory, directories)
             {
@@ -231,6 +231,7 @@ PythonSupport::PythonSupport(const QString &python_home, const QString &python_l
     else
     {
         // probably conda or standard Python
+        file_paths.append(QDir(python_home).absoluteFilePath("lib/libpython3.9.dylib"));
         file_paths.append(QDir(python_home).absoluteFilePath("lib/libpython3.8.dylib"));
         file_paths.append(QDir(python_home).absoluteFilePath("lib/libpython3.7m.dylib"));
     }
@@ -263,8 +264,10 @@ PythonSupport::PythonSupport(const QString &python_home, const QString &python_l
         {
             QDir home_dir(home_bin_path);
             home_dir.cdUp();
+            file_paths.append(home_dir.absoluteFilePath("lib/python3.9/config-3.9-x86_64-linux-gnu/libpython3.9.so"));
             file_paths.append(home_dir.absoluteFilePath("lib/python3.8/config-3.8-x86_64-linux-gnu/libpython3.8.so"));
             file_paths.append(home_dir.absoluteFilePath("lib/python3.7/config-3.7-x86_64-linux-gnu/libpython3.7m.so"));
+            file_paths.append(home_dir.absoluteFilePath("lib/libpython3.9.so"));
             file_paths.append(home_dir.absoluteFilePath("lib/libpython3.8.so"));
             file_paths.append(home_dir.absoluteFilePath("lib/libpython3.7m.so"));
         }
@@ -272,6 +275,7 @@ PythonSupport::PythonSupport(const QString &python_home, const QString &python_l
     else
     {
         // probably conda or standard Python
+        file_paths.append(QDir(python_home).absoluteFilePath("lib/libpython3.9.so"));
         file_paths.append(QDir(python_home).absoluteFilePath("lib/libpython3.8.so"));
         file_paths.append(QDir(python_home).absoluteFilePath("lib/libpython3.7m.so"));
     }
@@ -315,6 +319,10 @@ PythonSupport::PythonSupport(const QString &python_home, const QString &python_l
                     {
                         QDir home_dir(QDir::fromNativeSeparators(home_bin_path));
                         python_home_new = home_dir.absolutePath();
+                        file_paths.append(QDir(python_home).absoluteFilePath("Scripts/Python39.dll"));
+                        file_paths.append(QDir(python_home).absoluteFilePath("Python39.dll"));
+                        file_paths.append(QDir(python_home_new).absoluteFilePath("Scripts/Python39.dll"));
+                        file_paths.append(QDir(python_home_new).absoluteFilePath("Python39.dll"));
                         file_paths.append(QDir(python_home).absoluteFilePath("Scripts/Python38.dll"));
                         file_paths.append(QDir(python_home).absoluteFilePath("Python38.dll"));
                         file_paths.append(QDir(python_home_new).absoluteFilePath("Scripts/Python38.dll"));
@@ -330,6 +338,7 @@ PythonSupport::PythonSupport(const QString &python_home, const QString &python_l
     }
     else
     {
+        file_paths.append(QDir(python_home).absoluteFilePath("Python39.dll"));
         file_paths.append(QDir(python_home).absoluteFilePath("Python38.dll"));
         file_paths.append(QDir(python_home).absoluteFilePath("Python37.dll"));
     }
@@ -594,6 +603,7 @@ void PythonSupport::initialize(const QString &python_home, const QList<QString> 
 
                         // required to configure the path; see https://bugs.python.org/issue34725
                         QStringList python_paths;
+                        python_paths.append(QDir(python_home).absoluteFilePath("Scripts/python39.zip"));
                         python_paths.append(QDir(python_home).absoluteFilePath("Scripts/python38.zip"));
                         python_paths.append(QDir(python_home).absoluteFilePath("Scripts/python37.zip"));
                         python_paths.append(QDir(python_home_new).absoluteFilePath("DLLs"));
@@ -1594,4 +1604,16 @@ PyObject *PythonSupport::import(const char *name)
 // see https://github.com/python/cpython/pull/18361/files
 #undef _Py_Dealloc
 PyAPI_FUNC(void) _Py_Dealloc(PyObject *o) { _Py_Dealloc_inline(o); }
+#endif
+
+#if PY_MAJOR_VERSION == 3 && PY_MINOR_VERSION == 9
+// work around to provide required function that would be available by linking.
+#if defined(Q_OS_WIN)
+#pragma warning(push)
+#pragma warning(disable: 4273)  // do not warn about conflicting dllimport vs dllexport dll linkage.
+void _Py_Dealloc(PyObject* o) { (*(Py_TYPE(o)->tp_dealloc))(o); }
+#pragma warning(pop)
+#else
+PyAPI_FUNC(void) _Py_Dealloc(PyObject *o) { (*(Py_TYPE(o)->tp_dealloc))(o); }
+#endif
 #endif

@@ -17,7 +17,7 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-16.04]
-        python-version: [3.7, 3.8]
+        python-version: [3.7, 3.8, 3.9]
     steps:
     - uses: actions/checkout@v2
     - name: Set up Python ${{ matrix.python-version }}
@@ -46,7 +46,7 @@ jobs:
         popd
         python setup.py bdist_wheel
     - name: Set up Miniconda ${{ matrix.python-version }}
-      uses: conda-incubator/setup-miniconda@v1
+      uses: conda-incubator/setup-miniconda@v2
       with:
         auto-update-conda: true
         python-version: ${{ matrix.python-version }}
@@ -72,7 +72,7 @@ jobs:
     strategy:
       matrix:
         os: [macos-10.15]
-        python-version: [3.7, 3.8]
+        python-version: [3.7, 3.8, 3.9]
     steps:
     - uses: actions/checkout@v2
     - name: Set up Python ${{ matrix.python-version }}
@@ -87,7 +87,7 @@ jobs:
     - name: Install Qt
       uses: jurplel/install-qt-action@v2
       with:
-        version: '5.15.1'
+        version: '5.15.2'
         host: 'mac'
         target: 'desktop'
     - name: Build
@@ -105,7 +105,7 @@ jobs:
         popd
         python setup.py bdist_wheel
     - name: Set up Miniconda ${{ matrix.python-version }}
-      uses: conda-incubator/setup-miniconda@v1
+      uses: conda-incubator/setup-miniconda@v2
       with:
         auto-update-conda: true
         python-version: ${{ matrix.python-version }}
@@ -131,7 +131,7 @@ jobs:
     strategy:
       matrix:
         os: [windows-2019]
-        python-version: [3.7, 3.8]
+        python-version: [3.7, 3.8, 3.9]
     steps:
     - uses: actions/checkout@v2
     - name: Set up Python ${{ matrix.python-version }}
@@ -146,7 +146,7 @@ jobs:
     - name: Install Qt
       uses: jurplel/install-qt-action@v2
       with:
-        version: '5.15.1'
+        version: '5.15.2'
         host: 'windows'
         target: 'desktop'
         arch: 'win64_msvc2019_64'
@@ -168,7 +168,7 @@ jobs:
         popd
         python setup.py bdist_wheel
     - name: Set up Miniconda ${{ matrix.python-version }}
-      uses: conda-incubator/setup-miniconda@v1
+      uses: conda-incubator/setup-miniconda@v2
       with:
         auto-update-conda: true
         python-version: ${{ matrix.python-version }}
@@ -195,7 +195,7 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-16.04, ubuntu-18.04, ubuntu-20.04]
-        python-version: [3.7, 3.8]
+        python-version: [3.7, 3.8, 3.9]
     steps:
     - uses: actions/checkout@v2
     - name: Download Wheel
@@ -221,11 +221,13 @@ jobs:
     - name: Test system Python installed with official build with virtual environment
       shell: bash
       run: |
+        sudo apt update
         sudo apt-get install qt5-default -y
         python -m pip install --upgrade pip
         SYSTEM_PYTHON_EXE=python
         $SYSTEM_PYTHON_EXE -m venv test_venv
         source test_venv/bin/activate
+        python -m pip install --upgrade pip
         python -m pip install wheel
         python -m pip install packaging
         python -m pip install ${{ env.tool-package }}
@@ -237,7 +239,7 @@ jobs:
         xvfb-run ${{ env.tool-exe }} nionui_app.test_ack | grep ACK
         deactivate
     - name: Set up Miniconda ${{ matrix.python-version }}
-      uses: conda-incubator/setup-miniconda@v1
+      uses: conda-incubator/setup-miniconda@v2
       with:
         auto-update-conda: true
         python-version: ${{ matrix.python-version }}
@@ -259,7 +261,7 @@ jobs:
     strategy:
       matrix:
         os: [macos-10.15]
-        python-version: [3.7, 3.8]
+        python-version: [3.7, 3.8, 3.9]
     steps:
     - uses: actions/checkout@v2
     - name: Download Wheel
@@ -277,9 +279,11 @@ jobs:
     - name: Test system Python installed with brew with virtual environment
       shell: bash
       run: |
+        brew install python@${{ matrix.python-version }} || true
         SYSTEM_PYTHON_EXE=/usr/local/opt/python@${{ matrix.python-version }}/bin/python3
         $SYSTEM_PYTHON_EXE -m venv test_venv
         source test_venv/bin/activate
+        python -m pip install --upgrade pip
         python -m pip install wheel
         python -m pip install packaging
         python -m pip install ${{ env.tool-package }}
@@ -299,6 +303,7 @@ jobs:
         SYSTEM_PYTHON_EXE=python3
         $SYSTEM_PYTHON_EXE -m venv test_venv
         source test_venv/bin/activate
+        python -m pip install --upgrade pip
         python -m pip install wheel
         python -m pip install packaging
         python -m pip install ${{ env.tool-package }}
@@ -309,7 +314,7 @@ jobs:
         echo "Running test..."
         ${{ env.tool-exe }} nionui_app.test_ack | grep ACK
     - name: Set up Miniconda ${{ matrix.python-version }}
-      uses: conda-incubator/setup-miniconda@v1
+      uses: conda-incubator/setup-miniconda@v2
       with:
         auto-update-conda: true
         python-version: ${{ matrix.python-version }}
@@ -331,7 +336,7 @@ jobs:
     strategy:
       matrix:
         os: [windows-2019]
-        python-version: [3.7, 3.8]
+        python-version: [3.7, 3.8, 3.9]
     steps:
     - uses: actions/checkout@v2
     - name: Download Wheel
@@ -356,6 +361,7 @@ jobs:
         python -m pip install --upgrade pip
         python -m venv test_venv
         test_venv\Scripts\activate
+        python -m pip install --upgrade pip
         python -m pip install wheel
         python -m pip install packaging
         python -m pip install ${{ env.tool-package }}
@@ -368,7 +374,7 @@ jobs:
         ${{ env.tool-exe }} nionui_app.test_ack | grep ACK
         deactivate
     - name: Set up Miniconda ${{ matrix.python-version }}
-      uses: conda-incubator/setup-miniconda@v1
+      uses: conda-incubator/setup-miniconda@v2
       with:
         auto-update-conda: true
         python-version: ${{ matrix.python-version }}
