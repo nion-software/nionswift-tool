@@ -1,6 +1,11 @@
 Changelog (nionswift-tool)
 ==========================
 
+0.4.9 (2021-03-09)
+------------------
+- Add method to set window file path.
+- Add method to query keyboard modifiers directly.
+
 0.4.8 (2020-12-28)
 ------------------
 - Add color dialog.

@@ -1,5 +1,5 @@
 {% set name = "nionswift-tool" %}
-{% set version = "0.4.8" %}
+{% set version = "0.4.9" %}
 {% set macos_app = "Nion Swift" %}
 {% set app_dir = "NionSwiftLauncher" %}
 {% set macos_exe = "Nion Swift" %}
@@ -33,6 +33,7 @@ requirements:
     - numpy 1.19.*
   run:
     - python
+    - setuptools
 
 test:
   commands:
