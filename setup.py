@@ -4,7 +4,7 @@ import setuptools
 import sys
 
 tool_id = "nionswift"
-version = "0.4.9"
+version = "0.4.10"
 launcher = "NionSwiftLauncher"
 
 

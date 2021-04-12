@@ -1,5 +1,5 @@
 {% set name = "nionswift-tool" %}
-{% set version = "0.4.9" %}
+{% set version = "0.4.10" %}
 {% set macos_app = "Nion Swift" %}
 {% set app_dir = "NionSwiftLauncher" %}
 {% set macos_exe = "Nion Swift" %}
