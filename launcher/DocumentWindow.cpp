@@ -263,6 +263,7 @@ void PyPushButton::clicked()
 
 PyRadioButton::PyRadioButton()
 {
+    setAutoExclusive(false);
     connect(this, SIGNAL(clicked()), this, SLOT(clicked()));
 }
 
@@ -2905,6 +2906,10 @@ void ApplyStylesheet(QWidget *widget)
         {
             stylesheet = stylesheet_file.readAll();
 
+#if defined(Q_OS_WIN)
+            stylesheet = "QWidget { font-size: 11px }\n" + stylesheet;
+#endif
+
             float display_scaling = GetDisplayScaling();
 
             while (true)
@@ -2939,6 +2944,7 @@ QWidget *Widget_makeIntrinsicWidget(const QString &intrinsic_id)
         QHBoxLayout *row_layout = new QHBoxLayout(row);
         row_layout->setContentsMargins(0, 0, 0, 0);
         row_layout->setSpacing(0);
+        ApplyStylesheet(row);
         return row;
     }
     else if (intrinsic_id == "column")
@@ -2947,6 +2953,7 @@ QWidget *Widget_makeIntrinsicWidget(const QString &intrinsic_id)
         QVBoxLayout *column_layout = new QVBoxLayout(column);
         column_layout->setContentsMargins(0, 0, 0, 0);
         column_layout->setSpacing(0);
+        ApplyStylesheet(column);
         return column;
     }
     else if (intrinsic_id == "tab")

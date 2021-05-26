@@ -1386,6 +1386,9 @@ static PyObject *Core_out(PyObject * /*self*/, PyObject *args)
         {
             QTextStream cout(stdout);
             cout << (const char *)(output.toUtf8().data()) << endl;
+
+            QTextStream textStream(&static_cast<Application *>(qApp)->getLogFile());
+            textStream << (const char *)(output.toUtf8().data()) << endl;
         }
     }
 
@@ -1559,6 +1562,27 @@ static PyObject *DockWidget_getToggleAction(PyObject * /*self*/, PyObject *args)
         return NULL;
 
     return WrapQObject(dock_widget->toggleViewAction());
+}
+
+static PyObject *DocumentWindow_activate(PyObject * /*self*/, PyObject *args)
+{
+    if (qApp->thread() != QThread::currentThread())
+    {
+        PythonSupport::instance()->setErrorString("Must be called on UI thread.");
+        return NULL;
+    }
+
+    PyObject *obj0 = NULL;
+    if (!PythonSupport::instance()->parse()(args, "O", &obj0))
+        return NULL;
+
+    DocumentWindow *document_window = Unwrap<DocumentWindow>(obj0);
+    if (document_window == NULL)
+        return NULL;
+
+    document_window->activateWindow();
+
+    return PythonSupport::instance()->getNoneReturnValue();
 }
 
 static PyObject *DocumentWindow_addDockWidget(PyObject * /*self*/, PyObject *args)
@@ -2749,7 +2773,10 @@ static PyObject *Label_setTextColor(PyObject * /*self*/, PyObject *args)
         return NULL;
 
     QPalette palette = label->palette();
+    // are both palette colors required? maybe for different versions?
+    // foregroundRole is used on macOS Qt 15. argh.
     palette.setColor(QPalette::Text, QColor(r, g, b));
+    palette.setColor(label->foregroundRole(), QColor(r, g, b));
     label->setPalette(palette);
 
     return PythonSupport::instance()->getNoneReturnValue();
@@ -5831,6 +5858,16 @@ Application::Application(int & argv, char **args)
         m_splash_screen->show();
     }
 
+    QDir dir(QStandardPaths::writableLocation(QStandardPaths::TempLocation));
+    QString logPath = dir.filePath("log.txt");
+    QFile::remove(logPath);
+    QDir().mkpath(dir.absolutePath());
+
+    logFile.setFileName(logPath);
+    logFile.open(QIODevice::WriteOnly | QIODevice::Append);
+
+    // qDebug() << "Log file " << logPath;
+
     // TODO: Handle case where python home contains no dylib/dll.
     // TODO: Handle case where python home contains wrong version of python.
     // TODO: Handle case where python home missing required packages.
@@ -5894,6 +5931,7 @@ static PyMethodDef Methods[] = {
     {"Core_writeBinaryToImage", Core_writeBinaryToImage, METH_VARARGS, "Core_writeBinaryToImage."},
     {"DockWidget_connect", DockWidget_connect, METH_VARARGS, "DockWidget_connect."},
     {"DockWidget_getToggleAction", DockWidget_getToggleAction, METH_VARARGS, "DockWidget_getToggleAction."},
+    {"DocumentWindow_activate", DocumentWindow_activate, METH_VARARGS, "DocumentWindow_activate."},
     {"DocumentWindow_addDockWidget", DocumentWindow_addDockWidget, METH_VARARGS, "DocumentWindow_addDockWidget."},
     {"DocumentWindow_addMenu", DocumentWindow_addMenu, METH_VARARGS, "DocumentWindow_addMenu."},
     {"DocumentWindow_close", DocumentWindow_close, METH_VARARGS, "DocumentWindow_close."},

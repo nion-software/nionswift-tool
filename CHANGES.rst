@@ -1,6 +1,14 @@
 Changelog (nionswift-tool)
 ==========================
 
+0.4.11 (2021-05-26)
+-------------------
+- Fix radio button grouping issue.
+- Improve font behavior on Windows.
+- Add method to activate window.
+- Add logging of stdout to temp file.
+- Improve ability to set text color.
+
 0.4.10 (2021-04-12)
 -------------------
 - Use a more robust method for locating Python home on Linux (still not perfect).
