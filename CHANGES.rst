@@ -1,6 +1,10 @@
 Changelog (nionswift-tool)
 ==========================
 
+0.4.12 (2021-07-23)
+-------------------
+- Simplify GIL handling to support async more consistently.
+
 0.4.11 (2021-05-26)
 -------------------
 - Fix radio button grouping issue.
