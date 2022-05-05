@@ -1,6 +1,12 @@
 Changelog (nionswift-tool)
 ==========================
 
+0.4.14 (2021-05-04)
+-------------------
+- Add support for Python 3.10.
+- Drop support for Python 3.7.
+- Drop support for Ubuntu 16.04.
+
 0.4.13 (2021-08-19)
 -------------------
 - Fix widget count API call.
