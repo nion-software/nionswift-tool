@@ -2364,7 +2364,9 @@ QRectOptional PyCanvas::renderSection(QSharedPointer<CanvasSection> section)
     }
     if (!commands_binary.empty())
     {
-        QSharedPointer<QImage> image = QSharedPointer<QImage>(new QImage(rect.size(), QImage::Format_ARGB32_Premultiplied));
+        float devicePixelRatio = section->m_screen ? section->m_screen->devicePixelRatio() : 1.0;  // m_screen may be nullptr in earlier versions of Qt
+        // create the buffer image at a resolution suitable for the devicePixelRatio of the section's screen.
+        QSharedPointer<QImage> image = QSharedPointer<QImage>(new QImage(QSize(rect.width() * devicePixelRatio, rect.height() * devicePixelRatio), QImage::Format_ARGB32_Premultiplied));
         image->fill(QColor(0,0,0,0));
         QPainter painter(image.data());
         painter.setRenderHints(DEFAULT_RENDER_HINTS);
@@ -2612,7 +2614,11 @@ void PyCanvas::wheelEvent(QWheelEvent *event)
         float display_scaling = GetDisplayScaling();
         bool is_horizontal = abs(wheel_event->angleDelta().rx()) > abs(wheel_event->angleDelta().ry());
         QPoint delta = wheel_event->pixelDelta().isNull() ? wheel_event->angleDelta() : wheel_event->pixelDelta();
+#if QT_VERSION < QT_VERSION_CHECK(6,0,0)
+        app->dispatchPyMethod(m_py_object, "wheelChanged", QVariantList() << int(wheel_event->x() / display_scaling) << int(wheel_event->y() / display_scaling) << int(delta.x() / display_scaling) << int(delta.y() / display_scaling) << (bool)is_horizontal);
+#else
         app->dispatchPyMethod(m_py_object, "wheelChanged", QVariantList() << int(wheel_event->position().x() / display_scaling) << int(wheel_event->position().y() / display_scaling) << int(delta.x() / display_scaling) << int(delta.y() / display_scaling) << (bool)is_horizontal);
+#endif
     }
 }
 
@@ -2740,6 +2746,11 @@ void PyCanvas::setBinarySectionCommands(int section_id, const std::vector<quint3
             QSharedPointer<CanvasSection> new_section(new CanvasSection());
             m_sections[section_id] = new_section;
             section = new_section;
+#if QT_VERSION < QT_VERSION_CHECK(6,0,0)
+            section->m_screen = nullptr;
+#else
+            section->m_screen = screen();
+#endif
             section->m_section_id = section_id;
             section->rendering = false;
             section->time = 0;
