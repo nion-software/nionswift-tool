@@ -13,8 +13,13 @@
 #include <QtCore/QRunnable>
 #include <QtCore/QThread>
 #include <QtCore/QWaitCondition>
+#if QT_VERSION >= QT_VERSION_CHECK(6,2,0)
+#include <QtGui/QAction>
+#endif
 #include <QtGui/QDrag>
+#if QT_VERSION < QT_VERSION_CHECK(6,0,0)
 #include <QtWidgets/QAction>
+#endif
 #include <QtWidgets/QButtonGroup>
 #include <QtWidgets/QCheckBox>
 #include <QtWidgets/QComboBox>
@@ -285,7 +290,7 @@ struct RenderedTimeStamp
 
 typedef QList<RenderedTimeStamp> RenderedTimeStamps;
 
-RenderedTimeStamps PaintBinaryCommands(QPainter *painter, const std::vector<quint32> commands, const QMap<QString, QVariant> &imageMap, PaintImageCache *image_cache, LayerCache *layer_cache, float display_scaling = 0.0, int section_id = 0);
+RenderedTimeStamps PaintBinaryCommands(QPainter *painter, const std::vector<quint32> commands, const QMap<QString, QVariant> &imageMap, PaintImageCache *image_cache, LayerCache *layer_cache, float display_scaling = 0.0, int section_id = 0, float devicePixelRatio = 1.0);
 
 class PyStyledItemDelegate : public QStyledItemDelegate
 {
@@ -344,7 +349,7 @@ public:
     void setPyObject(const QVariant &py_object) { m_py_object = py_object; }
 
 private Q_SLOTS:
-    void buttonClicked(int button_id);
+    void buttonClicked(QAbstractButton *button);
 
 private:
     QVariant m_py_object;
@@ -496,6 +501,7 @@ public:
     QMutex m_mutex;
     QList<CanvasDrawingCommand> m_commands;
     std::vector<quint32> m_commands_binary;
+    QScreen *m_screen;
     QRect rect;
     QRect image_rect;
     QSharedPointer<QImage> image;
@@ -552,7 +558,11 @@ public:
 
     virtual bool event(QEvent *event) override;
 
+#if QT_VERSION < QT_VERSION_CHECK(6,0,0)
     virtual void enterEvent(QEvent *event) override;
+#else
+    virtual void enterEvent(QEnterEvent *event) override;
+#endif
     virtual void leaveEvent(QEvent *event) override;
     virtual void mousePressEvent(QMouseEvent *event) override;
     virtual void mouseReleaseEvent(QMouseEvent *event) override;
