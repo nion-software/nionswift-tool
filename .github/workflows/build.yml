@@ -18,8 +18,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-18.04]
+        os: [ubuntu-20.04]
         python-version: ["3.8", "3.9", "3.10"]
+        qt-version: ["6.3.2"]
     steps:
     - uses: actions/checkout@v2
     - name: Set up Python ${{ matrix.python-version }}
@@ -31,10 +32,16 @@ jobs:
       run: |
         python -c "import sys; print(sys.version)"
         python -c "import sys; print(sys.executable)"
+    - name: Install Qt
+      uses: jurplel/install-qt-action@v3
+      with:
+        version: ${{ matrix.qt-version }}
+        host: 'linux'
+        target: 'desktop'
+        arch: 'gcc_64'
     - name: Build
       shell: bash
       run: |
-        sudo apt-get install qt5-default -y
         python -m pip install --upgrade pip
         python -m pip install install wheel
         python -m pip install install packaging
@@ -46,6 +53,24 @@ jobs:
         mkdir -p linux
         mv build linux/x64
         popd
+        cp ../Qt/${{ matrix.qt-version }}/gcc_64/lib/libQt6Core.so.6 launcher/linux/x64
+        cp ../Qt/${{ matrix.qt-version }}/gcc_64/lib/libQt6DBus.so.6 launcher/linux/x64
+        cp ../Qt/${{ matrix.qt-version }}/gcc_64/lib/libQt6Gui.so.6 launcher/linux/x64
+        cp ../Qt/${{ matrix.qt-version }}/gcc_64/lib/libQt6OpenGL.so.6 launcher/linux/x64
+        cp ../Qt/${{ matrix.qt-version }}/gcc_64/lib/libQt6Widgets.so.6 launcher/linux/x64
+        cp ../Qt/${{ matrix.qt-version }}/gcc_64/lib/libQt6XcbQpa.so.6 launcher/linux/x64
+        cp ../Qt/${{ matrix.qt-version }}/gcc_64/lib/libicui18n.so.56 launcher/linux/x64
+        cp ../Qt/${{ matrix.qt-version }}/gcc_64/lib/libicudata.so.56 launcher/linux/x64
+        cp ../Qt/${{ matrix.qt-version }}/gcc_64/lib/libicuuc.so.56 launcher/linux/x64
+        mkdir -p launcher/linux/x64/plugins/platforms
+        mkdir -p launcher/linux/x64/plugins/imageformats
+        cp ../Qt/${{ matrix.qt-version }}/gcc_64/plugins/platforms/libqxcb.so launcher/linux/x64/plugins/platforms
+        cp ../Qt/${{ matrix.qt-version }}/gcc_64/plugins/imageformats/libq* launcher/linux/x64/plugins/imageformats
+        rm launcher/linux/x64/plugins/imageformats/libqsvg.so
+        chrpath -r "\$ORIGIN" launcher/linux/x64/libicu*.so.56
+        chrpath -r "\$ORIGIN/../.." launcher/linux/x64/plugins/platforms/libqxcb.so
+        chrpath -r "\$ORIGIN/../.." launcher/linux/x64/plugins/imageformats/*.so
+        printf "[Paths]\nPrefix=.\nPlugins=plugins\n" > launcher/linux/x64/qt.conf
         python setup.py bdist_wheel
     - name: Set up Miniconda ${{ matrix.python-version }}
       uses: conda-incubator/setup-miniconda@v2
@@ -77,6 +102,7 @@ jobs:
       matrix:
         os: [macos-10.15]
         python-version: ["3.8", "3.9", "3.10"]
+        qt-version: ["6.3.2"]
     steps:
     - uses: actions/checkout@v2
     - name: Set up Python ${{ matrix.python-version }}
@@ -89,13 +115,11 @@ jobs:
         python -c "import sys; print(sys.version)"
         python -c "import sys; print(sys.executable)"
     - name: Install Qt
-      uses: jurplel/install-qt-action@v2
+      uses: jurplel/install-qt-action@v3
       with:
-        version: '5.15.2'
+        version: ${{ matrix.qt-version }}
         host: 'mac'
         target: 'desktop'
-        setup-python: 'false'  # see https://github.com/jurplel/install-qt-action/issues/130
-        py7zrversion: '<0.16'  # see https://github.com/miurahr/pyppmd/issues/94#issuecomment-1083205387
     - name: Build
       shell: bash
       run: |
@@ -151,9 +175,9 @@ jobs:
         python -c "import sys; print(sys.version)"
         python -c "import sys; print(sys.executable)"
     - name: Install Qt
-      uses: jurplel/install-qt-action@v2
+      uses: jurplel/install-qt-action@v3
       with:
-        version: '5.15.2'
+        version: ${{ matrix.qt-version }}
         host: 'windows'
         target: 'desktop'
         arch: 'win64_msvc2019_64'
@@ -206,7 +230,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-18.04, ubuntu-20.04]
+        os: [ubuntu-20.04, ubuntu-22.04]
         python-version: ["3.8", "3.9", "3.10"]
     steps:
     - uses: actions/checkout@v2
@@ -230,11 +254,15 @@ jobs:
       shell: bash
       run: |
         sudo apt-get install xvfb -y
+        # libopengl0: see https://bugreports.qt.io/browse/QTBUG-89754
+        sudo apt-get install libopengl0 -y
+        # see https://doc.qt.io/qt-6/linux-requirements.html
+        sudo apt-get install libegl1 libfontconfig1 libfreetype6 libxcb1 libxcb-glx0 libxcb-keysyms1 libxcb-image0 libxcb-shm0 libxcb-icccm4 libxcb-xfixes0 libxcb-shape0 libxcb-randr0 libxcb-render-util0 libxcb-xinerama0 libxcb-xkb1 libxkbcommon-x11-0 -y
+        # sudo apt-get install libx11 libx11-xcb libxext libxfixes libxi libxrender libxcb-sync libxcb-util libxkbcommon
     - name: Test system Python installed with official build with virtual environment
       shell: bash
       run: |
         sudo apt update
-        sudo apt-get install qt5-default -y
         python -m pip install --upgrade pip
         SYSTEM_PYTHON_EXE=python
         $SYSTEM_PYTHON_EXE -m venv test_venv
@@ -245,9 +273,9 @@ jobs:
         python -m pip install ${{steps.download_wheel.outputs.download-path}}/*.whl
         python -m pip install numpy scipy h5py
         pushd nionui_app_test
-        python setup.py develop
+        python -m pip install .
         popd
-        echo "Running test..."
+        echo "Running test... ${{ env.tool-exe }}"
         xvfb-run ${{ env.tool-exe }} nionui_app.test_ack | grep ACK
         deactivate
     - name: Set up Miniconda ${{ matrix.python-version }}
@@ -265,11 +293,27 @@ jobs:
         conda install -y -c nion ${{ env.tool-package }}
         conda install -y ${{steps.download_conda.outputs.download-path}}/*.tar.bz2
         pushd nionui_app_test
-        python setup.py develop
+        python -m pip install .
         popd
         echo "Running test..."
         conda list
         xvfb-run ${{ env.tool-exe }} nionui_app.test_ack | grep ACK
+    - name: Test Conda Forge
+      shell: bash -l {0}
+      run: |
+        # use conda versions instead of pypi versions. install before anything else.
+        conda update -n base --all -y
+        conda create -n test-env -c conda-forge python=${{ matrix.python-version }} numpy scipy h5py imageio setuptools -y
+        conda activate test-env
+        conda install -y -c nion -c conda-forge ${{ env.tool-package }}
+        conda install -y -c conda-forge ${{steps.download_conda.outputs.download-path}}/*.tar.bz2
+        pushd nionui_app_test
+        python -m pip install .
+        popd
+        echo "Running test..."
+        conda list
+        xvfb-run ${{ env.tool-exe }} nionui_app.test_ack | grep ACK
+        conda deactivate
   test_macos:
     if: false
     needs: build_macos
@@ -297,7 +341,7 @@ jobs:
       shell: bash
       run: |
         brew install python@${{ matrix.python-version }} || true
-        SYSTEM_PYTHON_EXE=/usr/local/opt/python@${{ matrix.python-version }}/bin/python3
+        SYSTEM_PYTHON_EXE=/usr/local/bin/python${{ matrix.python-version }}
         $SYSTEM_PYTHON_EXE -m venv test_venv
         source test_venv/bin/activate
         python -m pip install --upgrade pip
@@ -307,7 +351,7 @@ jobs:
         python --version
         python -m pip install numpy scipy h5py
         pushd nionui_app_test
-        python setup.py develop
+        python -m pip install .
         popd
         echo "Running test..."
         ${{ env.tool-exe }} nionui_app.test_ack | grep ACK
@@ -328,7 +372,7 @@ jobs:
         python --version
         python -m pip install numpy scipy h5py
         pushd nionui_app_test
-        python setup.py develop
+        python -m pip install .
         popd
         echo "Running test..."
         ${{ env.tool-exe }} nionui_app.test_ack | grep ACK
@@ -342,15 +386,32 @@ jobs:
       shell: bash -l {0}
       run: |
         # use conda versions instead of pypi versions. install before anything else.
-        conda install numpy scipy h5py imageio setuptools -y
+        # use nomkl until anaconda gets its act together
+        conda install nomkl numpy scipy h5py imageio setuptools -y
         conda install -y -c nion ${{ env.tool-package }}
         conda install -y ${{steps.download_conda.outputs.download-path}}/*.tar.bz2
         pushd nionui_app_test
-        python setup.py develop
+        python -m pip install .
         popd
         echo "Running test..."
         conda list
         ${{ env.tool-exe }} nionui_app.test_ack | grep ACK
+    - name: Test Conda Forge
+      shell: bash -l {0}
+      run: |
+        # use conda versions instead of pypi versions. install before anything else.
+        # use nomkl until anaconda gets its act together
+        conda create -n test-env -c conda-forge python=${{ matrix.python-version }} numpy scipy h5py imageio setuptools -y
+        conda activate test-env
+        conda install -y -c nion -c conda-forge ${{ env.tool-package }}
+        conda install -y -c conda-forge ${{steps.download_conda.outputs.download-path}}/*.tar.bz2
+        pushd nionui_app_test
+        python -m pip install .
+        popd
+        echo "Running test..."
+        conda list
+        ${{ env.tool-exe }} nionui_app.test_ack | grep ACK
+        conda deactivate
   test_win:
     needs: build_win
     runs-on: ${{ matrix.os }}
@@ -392,7 +453,7 @@ jobs:
         python --version
         python -m pip install numpy scipy h5py
         pushd nionui_app_test
-        python setup.py develop
+        python -m pip install .
         popd
         echo "Running test..."
         ${{ env.tool-exe }} nionui_app.test_ack | grep ACK
@@ -414,8 +475,25 @@ jobs:
         $filename = Get-ChildItem -name ${{steps.download_conda.outputs.download-path}}\*.tar.bz2
         conda install -y ${{steps.download_conda.outputs.download-path}}\$filename
         pushd nionui_app_test
-        python setup.py develop --no-deps
+        python -m pip install .
         popd
         echo "Running test..."
         conda list
         ${{ env.tool-exe }} nionui_app.test_ack | grep ACK
+    - name: Test Conda Forge
+      shell: pwsh
+      run: |
+        # use conda versions instead of pypi versions. install before anything else.
+        conda update -n base --all -y
+        conda create -n test-env -c conda-forge python=${{ matrix.python-version }} numpy scipy h5py imageio setuptools -y
+        conda activate test-env
+        conda install -y -c nion -c conda-forge ${{ env.tool-package }}
+        $filename = Get-ChildItem -name ${{steps.download_conda.outputs.download-path}}\*.tar.bz2
+        conda install -y -c conda-forge ${{steps.download_conda.outputs.download-path}}\$filename
+        pushd nionui_app_test
+        python -m pip install .
+        popd
+        echo "Running test..."
+        conda list
+        ${{ env.tool-exe }} nionui_app.test_ack | grep ACK
+        conda deactivate
