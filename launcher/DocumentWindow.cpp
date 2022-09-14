@@ -14,22 +14,17 @@
 #include <QtCore/QRegularExpression>
 #include <QtCore/QStandardPaths>
 #include <QtCore/QSettings>
+#include <QtCore/QTextCodec>
 #include <QtCore/QThread>
 #include <QtCore/QThreadPool>
 #include <QtCore/QTimer>
 #include <QtCore/QUrl>
 
-#if QT_VERSION >= QT_VERSION_CHECK(6,2,0)
-#include <QtGui/QAction>
-#endif
 #include <QtGui/QFontDatabase>
 #include <QtGui/QPainter>
 #include <QtGui/QPainterPath>
-#include <QtGui/QScreen>
 
-#if QT_VERSION < QT_VERSION_CHECK(6,0,0)
 #include <QtWidgets/QAction>
-#endif
 #include <QtWidgets/QCheckBox>
 #include <QtWidgets/QComboBox>
 #include <QtWidgets/QFileDialog>
@@ -61,29 +56,7 @@
 
 Q_DECLARE_METATYPE(std::string)
 
-#if QT_VERSION < QT_VERSION_CHECK(6,0,0)
-const auto DEFAULT_RENDER_HINTS = QPainter::Antialiasing | QPainter::TextAntialiasing | QPainter::HighQualityAntialiasing;
-#else
-const auto DEFAULT_RENDER_HINTS = QPainter::Antialiasing | QPainter::TextAntialiasing;
-#endif
-
 QFont ParseFontString(const QString &font_string, float display_scaling = 1.0);
-
-QColor ParseColorString(const QString &color_string)
-{
-    QColor color;
-    QRegularExpression re1("^rgba\\((\\d+),\\s*(\\d+),\\s*(\\d+),\\s*(\\d+\\.\\d+)\\)$");
-    QRegularExpression re2("^rgb\\((\\d+),\\s*(\\d+),\\s*(\\d+)\\)$");
-    QRegularExpressionMatch match1 = re1.match(color_string);
-    QRegularExpressionMatch match2 = re2.match(color_string);
-    if (match1.hasMatch())
-        color = QColor(match1.captured(1).toInt(), match1.captured(2).toInt(), match1.captured(3).toInt(), match1.captured(4).toFloat() * 255);
-    else if (match2.hasMatch())
-        color = QColor(match2.captured(1).toInt(), match2.captured(2).toInt(), match2.captured(3).toInt());
-    else
-        color = QColor(color_string);
-    return color;
-}
 
 DocumentWindow::DocumentWindow(const QString &title, QWidget *parent)
     : QMainWindow(parent)
@@ -305,15 +278,15 @@ void PyRadioButton::clicked()
 
 PyButtonGroup::PyButtonGroup()
 {
-    connect(this, SIGNAL(buttonClicked(QAbstractButton *)), this, SLOT(buttonClicked(QAbstractButton *)));
+    connect(this, SIGNAL(buttonClicked(int)), this, SLOT(buttonClicked(int)));
 }
 
-void PyButtonGroup::buttonClicked(QAbstractButton *button)
+void PyButtonGroup::buttonClicked(int button_id)
 {
     if (m_py_object.isValid())
     {
         Application *app = dynamic_cast<Application *>(QCoreApplication::instance());
-        app->dispatchPyMethod(m_py_object, "clicked", QVariantList() << id(button));
+        app->dispatchPyMethod(m_py_object, "clicked", QVariantList() << button_id);
     }
 }
 
@@ -1200,7 +1173,16 @@ void PaintCommands(QPainter &painter, const QList<CanvasDrawingCommand> &command
         else if (cmd == "fillStyle")
         {
             QString color_arg = args[0].toString().simplified();
-            fill_color = ParseColorString(color_arg);
+            QRegExp re1("^rgba\\(([0-9]+),\\s*([0-9]+),\\s*([0-9]+),\\s*([0-9.]+)\\)$");
+            QRegExp re2("^rgb\\(([0-9]+),\\s*([0-9]+),\\s*([0-9]+)\\)$");
+            int pos1 = re1.indexIn(color_arg);
+            int pos2 = re2.indexIn(color_arg);
+            if (pos1 > -1)
+                fill_color = QColor(re1.cap(1).toInt(), re1.cap(2).toInt(), re1.cap(3).toInt(), re1.cap(4).toFloat() * 255);
+            else if (pos2 > -1)
+                fill_color = QColor(re2.cap(1).toInt(), re2.cap(2).toInt(), re2.cap(3).toInt());
+            else
+                fill_color = QColor(color_arg);
             fill_gradient = -1;
         }
         else if (cmd == "fillStyleGradient")
@@ -1282,7 +1264,16 @@ void PaintCommands(QPainter &painter, const QList<CanvasDrawingCommand> &command
         else if (cmd == "strokeStyle")
         {
             QString color_arg = args[0].toString().simplified();
-            line_color = ParseColorString(color_arg);
+            QRegExp re1("^rgba\\(([0-9]+),\\s*([0-9]+),\\s*([0-9]+),\\s*([0-9.]+)\\)$");
+            QRegExp re2("^rgb\\(([0-9]+),\\s*([0-9]+),\\s*([0-9]+)\\)$");
+            int pos1 = re1.indexIn(color_arg);
+            int pos2 = re2.indexIn(color_arg);
+            if (pos1 > -1)
+                line_color = QColor(re1.cap(1).toInt(), re1.cap(2).toInt(), re1.cap(3).toInt(), re1.cap(4).toFloat() * 255);
+            else if (pos2 > -1)
+                line_color = QColor(re2.cap(1).toInt(), re2.cap(2).toInt(), re2.cap(3).toInt());
+            else
+                line_color = QColor(color_arg);
         }
         else if (cmd == "lineDash")
         {
@@ -1395,16 +1386,11 @@ inline QString read_string(const quint32 *commands, unsigned int &command_index)
 
 struct NullDeleter {template<typename T> void operator()(T*) {} };
 
-RenderedTimeStamps PaintBinaryCommands(QPainter *rawPainter, const std::vector<quint32> commands_v, const QMap<QString, QVariant> &imageMap, PaintImageCache *image_cache, LayerCache *layer_cache, float display_scaling, int section_id, float devicePixelRatio)
+RenderedTimeStamps PaintBinaryCommands(QPainter *rawPainter, const std::vector<quint32> commands_v, const QMap<QString, QVariant> &imageMap, PaintImageCache *image_cache, LayerCache *layer_cache, float display_scaling, int section_id)
 {
     QSharedPointer<QPainter> painter(rawPainter, NullDeleter());
 
     RenderedTimeStamps rendered_timestamps;
-
-    // this will keep track of the total scaling applied in nested layers. it is used to
-    // update the rendered_timestamps with the proper global transform, which will be drawn
-    // at the top level and should not have resolution transforms applied.
-    float transform_scaling = 1.0;
 
     display_scaling = display_scaling ? display_scaling : GetDisplayScaling();
 
@@ -1917,7 +1903,16 @@ RenderedTimeStamps PaintBinaryCommands(QPainter *rawPainter, const std::vector<q
             case 0x666c7374: // flst, fill style
             {
                 QString color_arg = read_string(commands, command_index).simplified();
-                fill_color = ParseColorString(color_arg);
+                QRegExp re1("^rgba\\(([0-9]+),\\s*([0-9]+),\\s*([0-9]+),\\s*([0-9.]+)\\)$");
+                QRegExp re2("^rgb\\(([0-9]+),\\s*([0-9]+),\\s*([0-9]+)\\)$");
+                int pos1 = re1.indexIn(color_arg);
+                int pos2 = re2.indexIn(color_arg);
+                if (pos1 > -1)
+                    fill_color = QColor(re1.cap(1).toInt(), re1.cap(2).toInt(), re1.cap(3).toInt(), re1.cap(4).toFloat() * 255);
+                else if (pos2 > -1)
+                    fill_color = QColor(re2.cap(1).toInt(), re2.cap(2).toInt(), re2.cap(3).toInt());
+                else
+                    fill_color = QColor(color_arg);
                 fill_gradient = -1;
                 break;
             }
@@ -2017,7 +2012,16 @@ RenderedTimeStamps PaintBinaryCommands(QPainter *rawPainter, const std::vector<q
             {
                 QString arg0 = read_string(commands, command_index);
                 QString color_arg = arg0.simplified();
-                line_color = ParseColorString(color_arg);
+                QRegExp re1("^rgba\\(([0-9]+),\\s*([0-9]+),\\s*([0-9]+),\\s*([0-9.]+)\\)$");
+                QRegExp re2("^rgb\\(([0-9]+),\\s*([0-9]+),\\s*([0-9]+)\\)$");
+                int pos1 = re1.indexIn(color_arg);
+                int pos2 = re2.indexIn(color_arg);
+                if (pos1 > -1)
+                    line_color = QColor(re1.cap(1).toInt(), re1.cap(2).toInt(), re1.cap(3).toInt(), re1.cap(4).toFloat() * 255);
+                else if (pos2 > -1)
+                    line_color = QColor(re2.cap(1).toInt(), re2.cap(2).toInt(), re2.cap(3).toInt());
+                else
+                    line_color = QColor(color_arg);
                 break;
             }
             case 0x6c647368: // ldsh, line dash
@@ -2120,7 +2124,7 @@ RenderedTimeStamps PaintBinaryCommands(QPainter *rawPainter, const std::vector<q
                 QList<QSharedPointer<QPainter> > painter_stack_reversed = painter_stack;
                 std::reverse(painter_stack.begin(), painter_stack.end());
                 Q_FOREACH(QSharedPointer<QPainter> p, painter_stack_reversed)
-                    transform = QTransform::fromScale(1/transform_scaling, 1/transform_scaling) * p->transform() * transform;
+                    transform = p->transform() * transform;
                 rendered_timestamps.append(RenderedTimeStamp(transform, date_time, section_id));
                 break;
             }
@@ -2144,15 +2148,10 @@ RenderedTimeStamps PaintBinaryCommands(QPainter *rawPainter, const std::vector<q
                     {
                         painter_stack.push_back(painter);
                         layer_image_stack.push_back(layer_image);
-                        // create the layer image at a resolution suitable for the devicePixelRatio of the section's screen.
-                        layer_image = QSharedPointer<QImage>(new QImage(QSize(layer_rect.width() * devicePixelRatio, layer_rect.height() * devicePixelRatio), QImage::Format_ARGB32_Premultiplied));
+                        layer_image = QSharedPointer<QImage>(new QImage(layer_rect.size(), QImage::Format_ARGB32_Premultiplied));
                         layer_image->fill(QColor(0,0,0,0));
                         painter = QSharedPointer<QPainter>(new QPainter(layer_image.data()));
-                        painter->setRenderHints(DEFAULT_RENDER_HINTS);
-                        // draw everything at the higher scale of the section's screen.
-                        painter->scale(devicePixelRatio, devicePixelRatio);
-                        // track the transform scaling
-                        transform_scaling *= devicePixelRatio;
+                        painter->setRenderHints(QPainter::Antialiasing | QPainter::TextAntialiasing | QPainter::HighQualityAntialiasing);
                         painter->translate(layer_rect_left, layer_rect_top);
                     }
                 }
@@ -2185,8 +2184,6 @@ RenderedTimeStamps PaintBinaryCommands(QPainter *rawPainter, const std::vector<q
                         painter = painter_stack.takeLast();
                         painter->drawImage(layer_rect, *layer_image);
                         layer_image = layer_image_stack.takeLast();
-                        // track the transform scaling
-                        transform_scaling /= devicePixelRatio;
                     }
                 }
                 break;
@@ -2375,17 +2372,13 @@ QRectOptional PyCanvas::renderSection(QSharedPointer<CanvasSection> section)
         section_id = section->m_section_id;
         section->m_commands_binary.clear();
     }
-    if (!commands_binary.empty() && !rect.isEmpty())
+    if (!commands_binary.empty())
     {
-        float devicePixelRatio = section->m_screen ? section->m_screen->devicePixelRatio() : 1.0;  // m_screen may be nullptr in earlier versions of Qt
-        // create the buffer image at a resolution suitable for the devicePixelRatio of the section's screen.
-        QSharedPointer<QImage> image = QSharedPointer<QImage>(new QImage(QSize(rect.width() * devicePixelRatio, rect.height() * devicePixelRatio), QImage::Format_ARGB32_Premultiplied));
+        QSharedPointer<QImage> image = QSharedPointer<QImage>(new QImage(rect.size(), QImage::Format_ARGB32_Premultiplied));
         image->fill(QColor(0,0,0,0));
         QPainter painter(image.data());
-        painter.setRenderHints(DEFAULT_RENDER_HINTS);
-        // draw everything at the higher scale of the section's screen.
-        painter.scale(devicePixelRatio, devicePixelRatio);
-        RenderedTimeStamps rendered_timestamps = PaintBinaryCommands(&painter, commands_binary, imageMap, &section->m_image_cache, &section->m_layer_cache, 0.0, section_id, devicePixelRatio);
+        painter.setRenderHints(QPainter::Antialiasing | QPainter::TextAntialiasing | QPainter::HighQualityAntialiasing);
+        RenderedTimeStamps rendered_timestamps = PaintBinaryCommands(&painter, commands_binary, imageMap, &section->m_image_cache, &section->m_layer_cache, 0.0, section_id);
         painter.end();  // ending painter here speeds up QImage assignment below (Windows)
 
         QMutexLocker locker(&section->m_mutex);
@@ -2396,7 +2389,6 @@ QRectOptional PyCanvas::renderSection(QSharedPointer<CanvasSection> section)
         {
             QTransform transform = r.transform;
             transform.translate(rect.left(), rect.top());
-            transform = transform * QTransform::fromScale(1/devicePixelRatio, 1/devicePixelRatio);
             section->m_rendered_timestamps.append(RenderedTimeStamp(transform, r.dateTime, r.section_id));
         }
         return QRectOptional(rect);
@@ -2435,7 +2427,7 @@ void PyCanvas::paintEvent(QPaintEvent *event)
         if (image && !image->isNull() && image_rect.intersects(event->rect()))
         {
             // qDebug() << "draw " << image_rect.topLeft();
-            painter.drawImage(image_rect, *image);
+            painter.drawImage(image_rect.topLeft(), *image);
         }
     }
 
@@ -2445,7 +2437,7 @@ void PyCanvas::paintEvent(QPaintEvent *event)
     Q_FOREACH(const RenderedTimeStamp &rendered_timestamp, rendered_timestamps)
     {
         painter.save();
-        painter.setRenderHints(DEFAULT_RENDER_HINTS);
+        painter.setRenderHints(QPainter::Antialiasing | QPainter::TextAntialiasing | QPainter::HighQualityAntialiasing);
         QDateTime dt = rendered_timestamp.dateTime;
         QDateTime utc = known_dts.contains(dt) ? known_dts[dt] : QDateTime::currentDateTimeUtc();
         m_known_dts[dt] = utc;
@@ -2525,11 +2517,7 @@ bool PyCanvas::event(QEvent *event)
     return QWidget::event(event);
 }
 
-#if QT_VERSION < QT_VERSION_CHECK(6,0,0)
 void PyCanvas::enterEvent(QEvent *event)
-#else
-void PyCanvas::enterEvent(QEnterEvent *event)
-#endif
 {
     Q_UNUSED(event)
 
@@ -2558,11 +2546,7 @@ void PyCanvas::mousePressEvent(QMouseEvent *event)
         float display_scaling = GetDisplayScaling();
 
         Application *app = dynamic_cast<Application *>(QCoreApplication::instance());
-#if QT_VERSION < QT_VERSION_CHECK(6,0,0)
         app->dispatchPyMethod(m_py_object, "mousePressed", QVariantList() << int(event->x() / display_scaling) << int(event->y() / display_scaling) << (int)event->modifiers());
-#else
-        app->dispatchPyMethod(m_py_object, "mousePressed", QVariantList() << int(event->position().x() / display_scaling) << int(event->position().y() / display_scaling) << (int)event->modifiers());
-#endif
         m_last_pos = event->pos();
         m_pressed = true;
     }
@@ -2575,20 +2559,12 @@ void PyCanvas::mouseReleaseEvent(QMouseEvent *event)
         float display_scaling = GetDisplayScaling();
 
         Application *app = dynamic_cast<Application *>(QCoreApplication::instance());
-#if QT_VERSION < QT_VERSION_CHECK(6,0,0)
         app->dispatchPyMethod(m_py_object, "mouseReleased", QVariantList() << int(event->x() / display_scaling) << int(event->y() / display_scaling) << (int)event->modifiers());
-#else
-        app->dispatchPyMethod(m_py_object, "mouseReleased", QVariantList() << int(event->position().x() / display_scaling) << int(event->position().y() / display_scaling) << (int)event->modifiers());
-#endif
         m_pressed = false;
 
         if ((event->pos() - m_last_pos).manhattanLength() < 6 * display_scaling)
         {
-#if QT_VERSION < QT_VERSION_CHECK(6,0,0)
             app->dispatchPyMethod(m_py_object, "mouseClicked", QVariantList() << int(event->x() / display_scaling) << int(event->y() / display_scaling) << (int)event->modifiers());
-#else
-            app->dispatchPyMethod(m_py_object, "mouseClicked", QVariantList() << int(event->position().x() / display_scaling) << int(event->position().y() / display_scaling) << (int)event->modifiers());
-#endif
         }
     }
 }
@@ -2600,11 +2576,7 @@ void PyCanvas::mouseDoubleClickEvent(QMouseEvent *event)
         float display_scaling = GetDisplayScaling();
 
         Application *app = dynamic_cast<Application *>(QCoreApplication::instance());
-#if QT_VERSION < QT_VERSION_CHECK(6,0,0)
         app->dispatchPyMethod(m_py_object, "mouseDoubleClicked", QVariantList() << int(event->x() / display_scaling) << int(event->y() / display_scaling) << (int)event->modifiers());
-#else
-        app->dispatchPyMethod(m_py_object, "mouseDoubleClicked", QVariantList() << int(event->position().x() / display_scaling) << int(event->position().y() / display_scaling) << (int)event->modifiers());
-#endif
     }
 }
 
@@ -2626,20 +2598,12 @@ void PyCanvas::mouseMoveEvent(QMouseEvent *event)
             QApplication::changeOverrideCursor(Qt::BlankCursor);
         }
 
-#if QT_VERSION < QT_VERSION_CHECK(6,0,0)
         app->dispatchPyMethod(m_py_object, "mousePositionChanged", QVariantList() << int(event->x() / display_scaling) << int(event->y() / display_scaling) << (int)event->modifiers());
-#else
-        app->dispatchPyMethod(m_py_object, "mousePositionChanged", QVariantList() << int(event->position().x() / display_scaling) << int(event->position().y() / display_scaling) << (int)event->modifiers());
-#endif
 
         // handle case of not getting mouse released event after drag.
         if (m_pressed && !(event->buttons() & Qt::LeftButton))
         {
-#if QT_VERSION < QT_VERSION_CHECK(6,0,0)
             app->dispatchPyMethod(m_py_object, "mouseReleased", QVariantList() << int(event->x() / display_scaling) << int(event->y() / display_scaling) << (int)event->modifiers());
-#else
-            app->dispatchPyMethod(m_py_object, "mouseReleased", QVariantList() << int(event->position().x() / display_scaling) << int(event->position().y() / display_scaling) << (int)event->modifiers());
-#endif
             m_pressed = false;
         }
     }
@@ -2652,13 +2616,9 @@ void PyCanvas::wheelEvent(QWheelEvent *event)
         Application *app = dynamic_cast<Application *>(QCoreApplication::instance());
         QWheelEvent *wheel_event = static_cast<QWheelEvent *>(event);
         float display_scaling = GetDisplayScaling();
-        bool is_horizontal = abs(wheel_event->angleDelta().rx()) > abs(wheel_event->angleDelta().ry());
+        bool is_horizontal = wheel_event->orientation() == Qt::Horizontal;
         QPoint delta = wheel_event->pixelDelta().isNull() ? wheel_event->angleDelta() : wheel_event->pixelDelta();
-#if QT_VERSION < QT_VERSION_CHECK(6,0,0)
         app->dispatchPyMethod(m_py_object, "wheelChanged", QVariantList() << int(wheel_event->x() / display_scaling) << int(wheel_event->y() / display_scaling) << int(delta.x() / display_scaling) << int(delta.y() / display_scaling) << (bool)is_horizontal);
-#else
-        app->dispatchPyMethod(m_py_object, "wheelChanged", QVariantList() << int(wheel_event->position().x() / display_scaling) << int(wheel_event->position().y() / display_scaling) << int(delta.x() / display_scaling) << int(delta.y() / display_scaling) << (bool)is_horizontal);
-#endif
     }
 }
 
@@ -2786,11 +2746,6 @@ void PyCanvas::setBinarySectionCommands(int section_id, const std::vector<quint3
             QSharedPointer<CanvasSection> new_section(new CanvasSection());
             m_sections[section_id] = new_section;
             section = new_section;
-#if QT_VERSION < QT_VERSION_CHECK(6,0,0)
-            section->m_screen = nullptr;
-#else
-            section->m_screen = screen();
-#endif
             section->m_section_id = section_id;
             section->rendering = false;
             section->time = 0;
@@ -2881,11 +2836,7 @@ void PyCanvas::dragMoveEvent(QDragMoveEvent *event)
     {
         Application *app = dynamic_cast<Application *>(QCoreApplication::instance());
         float display_scaling = GetDisplayScaling();
-#if QT_VERSION < QT_VERSION_CHECK(6,0,0)
         QString action = app->dispatchPyMethod(m_py_object, "dragMoveEvent", QVariantList() << QVariant::fromValue((QObject *)event->mimeData()) << int(event->pos().x() / display_scaling) << int(event->pos().y() / display_scaling)).toString();
-#else
-        QString action = app->dispatchPyMethod(m_py_object, "dragMoveEvent", QVariantList() << QVariant::fromValue((QObject *)event->mimeData()) << int(event->position().x() / display_scaling) << int(event->position().y() / display_scaling)).toString();
-#endif
         if (action == "copy")
         {
             event->setDropAction(Qt::CopyAction);
@@ -2918,11 +2869,7 @@ void PyCanvas::dropEvent(QDropEvent *event)
     {
         Application *app = dynamic_cast<Application *>(QCoreApplication::instance());
         float display_scaling = GetDisplayScaling();
-#if QT_VERSION < QT_VERSION_CHECK(6,0,0)
         QString action = app->dispatchPyMethod(m_py_object, "dropEvent", QVariantList() << QVariant::fromValue((QObject *)event->mimeData()) << int(event->pos().x() / display_scaling) << int(event->pos().y() / display_scaling)).toString();
-#else
-        QString action = app->dispatchPyMethod(m_py_object, "dropEvent", QVariantList() << QVariant::fromValue((QObject *)event->mimeData()) << int(event->position().x() / display_scaling) << int(event->position().y() / display_scaling)).toString();
-#endif
         if (action == "copy")
         {
             event->setDropAction(Qt::CopyAction);
@@ -2950,9 +2897,9 @@ void PyCanvas::dropEvent(QDropEvent *event)
 
 void ApplyStylesheet(QWidget *widget)
 {
-    static QString stylesheet;
+    static QString stylesheet = NULL;
 
-    if (stylesheet.isEmpty())
+    if (stylesheet == NULL)
     {
         QFile stylesheet_file(":/app/stylesheet.qss");
         if (stylesheet_file.open(QIODevice::ReadOnly))
@@ -3829,7 +3776,7 @@ void PyStyledItemDelegate::paint(QPainter *painter, const QStyleOptionViewItem &
     style->drawControl(QStyle::CE_ItemViewItem, &option_copy, painter, widget);
 
     painter->save();
-    painter->setRenderHints(DEFAULT_RENDER_HINTS | QPainter::SmoothPixmapTransform);
+    painter->setRenderHints(QPainter::Antialiasing | QPainter::TextAntialiasing | QPainter::SmoothPixmapTransform);
 
     if (m_py_object.isValid())
     {

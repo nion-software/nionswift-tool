@@ -45,13 +45,6 @@
 
 #include "LauncherConfig.h"
 
-#if QT_VERSION < QT_VERSION_CHECK(5, 14, 0)
-namespace Qt
-{
-    static auto endl = ::endl;
-}
-#endif
-
 QString lastVisitedDir;
 
 QString GetDirectory(const QString &path)
@@ -143,7 +136,7 @@ QString GetExistingDirectory(QWidget *parent,
     // create a qt dialog
     QFileDialog dialog(parent, caption, WorkingDirectory(dir));
     dialog.selectFile(InitialSelection(dir));
-    dialog.setFileMode(QFileDialog::Directory);  // also QFileDialog::Directory
+    dialog.setFileMode(QFileDialog::DirectoryOnly);  // also QFileDialog::Directory
     if (dialog.exec() == QDialog::Accepted) {
         if (selectedDirectory)
         *selectedDirectory = dialog.directory();
@@ -1245,7 +1238,7 @@ QFont ParseFontString(const QString &font_string, float display_scaling = 1.0)
 
     QStringList family_list;
     QString family_str = family_parts.join(" ");
-    QChar quote(static_cast<int>(0));
+    QChar quote = 0;
     QString family;
     for (int i = 0; i < family_str.size(); i++)
     {
@@ -1270,7 +1263,7 @@ QFont ParseFontString(const QString &font_string, float display_scaling = 1.0)
         {
             if (current == quote)
             {
-                quote = QChar(static_cast<int>(0));
+                quote = 0;
             }
             else
             {
@@ -1280,7 +1273,7 @@ QFont ParseFontString(const QString &font_string, float display_scaling = 1.0)
     }
     family_list << family.simplified();
 
-    QStringList families = QFontDatabase::families();
+    QStringList families = QFontDatabase().families();
     Q_FOREACH(const QString &family, family_list)
     {
         if (families.contains(family, Qt::CaseInsensitive))
@@ -1392,10 +1385,10 @@ static PyObject *Core_out(PyObject * /*self*/, PyObject *args)
         if (!output.isEmpty())
         {
             QTextStream cout(stdout);
-            cout << (const char *)(output.toUtf8().data()) << Qt::endl;
+            cout << (const char *)(output.toUtf8().data()) << endl;
 
             QTextStream textStream(&static_cast<Application *>(qApp)->getLogFile());
-            textStream << (const char *)(output.toUtf8().data()) << Qt::endl;
+            textStream << (const char *)(output.toUtf8().data()) << endl;
         }
     }
 
@@ -1631,7 +1624,7 @@ static PyObject *DocumentWindow_addDockWidget(PyObject * /*self*/, PyObject *arg
     mapping["all"] = Qt::AllDockWidgetAreas;
     mapping["none"] = Qt::NoDockWidgetArea;
 
-    Qt::DockWidgetAreas allowed_positions_mask = Qt::NoDockWidgetArea;
+    Qt::DockWidgetAreas allowed_positions_mask = 0;
     Q_FOREACH(const QString &allowed_position, allowed_positions)
     {
         allowed_positions_mask |= mapping[allowed_position];
@@ -2219,7 +2212,7 @@ static PyObject *DocumentWindow_setWindowStyle(PyObject * /*self*/, PyObject *ar
     mapping["input-transparent"] = Qt::WindowTransparentForInput;
     mapping["no-focus"] = Qt::WindowDoesNotAcceptFocus;
 
-    Qt::WindowFlags windowFlags = Qt::Widget;
+    Qt::WindowFlags windowFlags = 0;
     Q_FOREACH(const QString &style, styles)
     {
         if (mapping.contains(style))
@@ -5332,7 +5325,7 @@ static PyObject *Widget_insertWidget(PyObject * /*self*/, PyObject *args)
         return NULL;
 
     // Alignment
-    Qt::Alignment alignment = Qt::Alignment(0);
+    Qt::Alignment alignment = 0;
     if (alignment_c)
     {
         if (strcmp(alignment_c, "left") == 0)
@@ -5638,10 +5631,7 @@ static PyObject *Widget_setPaletteColor(PyObject * /*self*/, PyObject *args)
 
     QPalette palette = widget->palette();
     if (role_str == "background")
-    {
         palette.setColor(widget->backgroundRole(), QColor(r, g, b, a));
-        widget->setAutoFillBackground(r != 0 || g != 0 || b != 0 || a != 0);
-    }
     widget->setPalette(palette);
 
     return PythonSupport::instance()->getNoneReturnValue();
@@ -6145,7 +6135,7 @@ bool Application::initialize()
                     continue;
 
                 if (line.startsWith("["))
-                    section = line.replace(QRegularExpression("\\[([A-Za-z0-9_-]+)\\]"), "\\1");
+                    section = line.replace(QRegExp("\\[([A-Za-z9-0_-]+)\\]"), "\\1");
 
                 if (section == "python" && line.startsWith("home = "))
                 {

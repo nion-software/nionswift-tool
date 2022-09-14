@@ -12,7 +12,6 @@
 #include <QtCore/QMetaType>
 #include <QtCore/QObject>
 #include <QtCore/QProcessEnvironment>
-#include <QtCore/QRegularExpression>
 #include <QtCore/QSettings>
 #include <QtCore/QStandardPaths>
 #include <QtCore/QStringList>
@@ -96,15 +95,64 @@ static void* init_numpy() {
 #include <WinBase.h>
 #endif
 
-#if QT_VERSION < QT_VERSION_CHECK(5, 14, 0)
-namespace Qt
-{
-    static auto endl = ::endl;
-}
-#endif
-
 static PythonSupport *thePythonSupport = NULL;
 const char* PythonSupport::qobject_capsule_name = "b93c9a511d32.qobject";
+
+void PythonSupport::checkTarget(const QString &python_path)
+{
+    // this code does not work since Python is not made to
+    // be un-loadable. Once NumPy is initialized, it cannot
+    // be initialized again.
+#if defined(Q_OS_WIN)
+    const char *script =
+        "found = '>'\n"
+        "try:\n"
+        "  # import scipy\n"
+        "  found += ' scipy'\n"
+        "except BaseException as e:\n"
+        "  found += ' no-scipy ' + str(e)\n";
+    SetEnvironmentVariable("PYTHONPATH", "C:\\Miniconda3");
+    SetEnvironmentVariable("PYTHONHOME", "C:\\Miniconda3");
+    HMODULE m = LoadLibrary("C:\\Miniconda3\\Python34.dll");
+    typedef void(*Py_InitializeFn)();
+    typedef void(*Py_FinalizeFn)();
+    typedef void(*Py_DecRefFn)(PyObject *);
+    typedef PyObject* (*PyRun_StringFn)(const char *, int start, PyObject *globals, PyObject *locals);
+    typedef char* (*PyBytes_AsStringFn)(PyObject *);
+    typedef PyObject* (*PyDict_NewFn)();
+    typedef PyObject* (*PyDict_GetItemStringFn)(PyObject *p, const char *key);
+    typedef PyObject* (*PyUnicode_AsUTF8StringFn)(PyObject *unicode);
+    typedef PyObject* (*PyImport_AddModuleFn)(const char *module_name);
+    typedef void(*PyImport_CleanupFn)();
+    typedef PyObject* (*PyModule_GetDictFn)(PyObject *module);
+    Py_InitializeFn py_initialize_fn = (Py_InitializeFn)GetProcAddress(m, "Py_Initialize");
+    Py_FinalizeFn py_finalize_fn = (Py_FinalizeFn)GetProcAddress(m, "Py_Finalize");
+    Py_DecRefFn py_dec_ref_fn = (Py_DecRefFn)GetProcAddress(m, "Py_DecRef");
+    PyRun_StringFn pyrun_string_fn = (PyRun_StringFn)GetProcAddress(m, "PyRun_String");
+    PyBytes_AsStringFn pybytes_as_string_fn = (PyBytes_AsStringFn)GetProcAddress(m, "PyBytes_AsString");
+    PyUnicode_AsUTF8StringFn pyunicode_as_utf8_string_fn = (PyUnicode_AsUTF8StringFn)GetProcAddress(m, "PyUnicode_AsUTF8String");
+    PyDict_NewFn pydict_new_fn = (PyDict_NewFn)GetProcAddress(m, "PyDict_New");
+    PyDict_GetItemStringFn pydict_get_item_string_fn = (PyDict_GetItemStringFn)GetProcAddress(m, "PyDict_GetItemString");
+    PyImport_AddModuleFn pyimport_add_module_fn = (PyImport_AddModuleFn)GetProcAddress(m, "PyImport_AddModule");
+    PyImport_CleanupFn pyimport_cleanup_fn = (PyImport_CleanupFn)GetProcAddress(m, "PyImport_Cleanup");
+    PyModule_GetDictFn pymodule_get_dict_fn = (PyModule_GetDictFn)GetProcAddress(m, "PyModule_GetDict");
+    Q_ASSERT(py_initialize_fn != NULL);
+    Q_ASSERT(pyrun_string_fn != NULL);
+    Q_ASSERT(pybytes_as_string_fn != NULL);
+    Q_ASSERT(pydict_new_fn != NULL);
+    Q_ASSERT(pydict_get_item_string_fn != NULL);
+    py_initialize_fn();
+    PyObject *py_main = pyimport_add_module_fn("__main__");
+    PyObject *py_dict = pymodule_get_dict_fn(py_main);
+    //PyObject *py_dict = pydict_new_fn();
+    PyObject* result = pyrun_string_fn(script, Py_file_input, py_dict, py_dict);
+    qDebug() << "Result: " << QString::fromUtf8(pybytes_as_string_fn(pyunicode_as_utf8_string_fn(pydict_get_item_string_fn(py_dict, "found"))));
+    py_dec_ref_fn(result);
+    //py_finalize_fn();
+
+    //FreeLibrary(m);
+#endif
+}
 
 QString PythonSupport::ensurePython(const QString &python_home)
 {
@@ -113,7 +161,7 @@ QString PythonSupport::ensurePython(const QString &python_home)
 
     if (!python_home.isEmpty() && QFile(python_home).exists())
     {
-        cout << "Using Python environment: " << python_home << Qt::endl;
+        cout << "Using Python environment: " << python_home << endl;
         return python_home;
     }
 #endif
@@ -156,10 +204,9 @@ PythonSupport::PythonSupport(const QString &python_home, const QString &python_l
         if (!home_bin_path.isEmpty())
         {
             QString version_str = settings.value("version").toString();
-            QRegularExpression re("(\\d+)\\.(\\d+)(\\.\\d+)?");
-            QRegularExpressionMatch match = re.match(version_str);
-            if (match.hasMatch())
-                version_str = QString::number(match.captured(1).toInt()) + "." + QString::number(match.captured(2).toInt());
+            QRegExp re("(\\d+)\\.(\\d+)(\\.\\d+)?");
+            if (re.indexIn(version_str) != -1)
+                version_str = QString::number(re.cap(1).toInt()) + "." + QString::number(re.cap(2).toInt());
 
             QDir home_dir(home_bin_path);
 
@@ -167,7 +214,7 @@ PythonSupport::PythonSupport(const QString &python_home, const QString &python_l
             directories << home_dir.absoluteFilePath("../lib") << "/usr/local/Cellar/python@" + version_str;
 
             QStringList variants;
-            variants << "libpython3.11.dylib" << "libpython3.10.dylib" << "libpython3.9.dylib" << "libpython3.8.dylib";
+            variants << "libpython3.10.dylib" << "libpython3.9.dylib" << "libpython3.8.dylib";
 
             Q_FOREACH(const QString &directory, directories)
             {
@@ -184,7 +231,6 @@ PythonSupport::PythonSupport(const QString &python_home, const QString &python_l
     else
     {
         // probably conda or standard Python
-        file_paths.append(QDir(python_home).absoluteFilePath("lib/libpython3.11.dylib"));
         file_paths.append(QDir(python_home).absoluteFilePath("lib/libpython3.10.dylib"));
         file_paths.append(QDir(python_home).absoluteFilePath("lib/libpython3.9.dylib"));
         file_paths.append(QDir(python_home).absoluteFilePath("lib/libpython3.8.dylib"));
@@ -218,11 +264,9 @@ PythonSupport::PythonSupport(const QString &python_home, const QString &python_l
         {
             QDir home_dir(home_bin_path);
             home_dir.cdUp();
-            file_paths.append(home_dir.absoluteFilePath("lib/python3.11/config-3.11-x86_64-linux-gnu/libpython3.11.so"));
             file_paths.append(home_dir.absoluteFilePath("lib/python3.10/config-3.10-x86_64-linux-gnu/libpython3.10.so"));
             file_paths.append(home_dir.absoluteFilePath("lib/python3.9/config-3.9-x86_64-linux-gnu/libpython3.9.so"));
             file_paths.append(home_dir.absoluteFilePath("lib/python3.8/config-3.8-x86_64-linux-gnu/libpython3.8.so"));
-            file_paths.append(home_dir.absoluteFilePath("lib/libpython3.11.so"));
             file_paths.append(home_dir.absoluteFilePath("lib/libpython3.10.so"));
             file_paths.append(home_dir.absoluteFilePath("lib/libpython3.9.so"));
             file_paths.append(home_dir.absoluteFilePath("lib/libpython3.8.so"));
@@ -231,7 +275,6 @@ PythonSupport::PythonSupport(const QString &python_home, const QString &python_l
     else
     {
         // probably conda or standard Python
-        file_paths.append(QDir(python_home).absoluteFilePath("lib/libpython3.11.so"));
         file_paths.append(QDir(python_home).absoluteFilePath("lib/libpython3.10.so"));
         file_paths.append(QDir(python_home).absoluteFilePath("lib/libpython3.9.so"));
         file_paths.append(QDir(python_home).absoluteFilePath("lib/libpython3.8.so"));
@@ -273,21 +316,16 @@ PythonSupport::PythonSupport(const QString &python_home, const QString &python_l
         {
             QByteArray bytes = file.readAll();
             QString str = QString::fromUtf8(bytes);
-            Q_FOREACH(const QString &line, str.split(QRegularExpression("[\r\n]"), Qt::SkipEmptyParts))
+            Q_FOREACH(const QString &line, str.split(QRegExp("[\r\n]"), QString::SkipEmptyParts))
             {
-                QRegularExpression re("^home\\s?=\\s?(.+)$");
-                QRegularExpressionMatch match = re.match(line);
-                if (match.hasMatch())
+                QRegExp re("^home\\s?=\\s?(.+)$");
+                if (re.indexIn(line) >= 0)
                 {
-                    QString home_bin_path = match.captured(1).trimmed();
+                    QString home_bin_path = re.cap(1).trimmed();
                     if (!home_bin_path.isEmpty())
                     {
                         QDir home_dir(QDir::fromNativeSeparators(home_bin_path));
                         python_home_new = home_dir.absolutePath();
-                        file_paths.append(QDir(python_home).absoluteFilePath("Scripts/Python311.dll"));
-                        file_paths.append(QDir(python_home).absoluteFilePath("Python311.dll"));
-                        file_paths.append(QDir(python_home_new).absoluteFilePath("Scripts/Python311.dll"));
-                        file_paths.append(QDir(python_home_new).absoluteFilePath("Python311.dll"));
                         file_paths.append(QDir(python_home).absoluteFilePath("Scripts/Python310.dll"));
                         file_paths.append(QDir(python_home).absoluteFilePath("Python310.dll"));
                         file_paths.append(QDir(python_home_new).absoluteFilePath("Scripts/Python310.dll"));
@@ -307,7 +345,6 @@ PythonSupport::PythonSupport(const QString &python_home, const QString &python_l
     }
     else
     {
-        file_paths.append(QDir(python_home).absoluteFilePath("Python311.dll"));
         file_paths.append(QDir(python_home).absoluteFilePath("Python310.dll"));
         file_paths.append(QDir(python_home).absoluteFilePath("Python39.dll"));
         file_paths.append(QDir(python_home).absoluteFilePath("Python38.dll"));
@@ -347,7 +384,7 @@ PythonSupport::PythonSupport(const QString &python_home, const QString &python_l
     // required, see https://bugs.python.org/issue36085
     AddDllDirectory((PCWSTR)(QDir::toNativeSeparators(QDir(python_home).absoluteFilePath("Library/bin")).utf16()));
 
-    void *dl = LoadLibraryA(QDir::toNativeSeparators(file_path).toUtf8());
+    void *dl = LoadLibrary(QDir::toNativeSeparators(file_path).toUtf8());
 #endif
     extern void initialize_pylib(void *);
     initialize_pylib(dl);
@@ -562,13 +599,12 @@ void PythonSupport::initialize(const QString &python_home, const QList<QString> 
         {
             QByteArray bytes = file.readAll();
             QString str = QString::fromUtf8(bytes);
-            Q_FOREACH(const QString &line, str.split(QRegularExpression("[\r\n]"), Qt::SkipEmptyParts))
+            Q_FOREACH(const QString &line, str.split(QRegExp("[\r\n]"), QString::SkipEmptyParts))
             {
-                QRegularExpression re("^home\\s?=\\s?(.+)$");
-                QRegularExpressionMatch match = re.match(line);
-                if (match.hasMatch())
+                QRegExp re("^home\\s?=\\s?(.+)$");
+                if (re.indexIn(line) >= 0)
                 {
-                    QString home_bin_path = match.captured(1).trimmed();
+                    QString home_bin_path = re.cap(1).trimmed();
                     if (!home_bin_path.isEmpty())
                     {
                         python_home_new = m_actual_python_home;
@@ -577,7 +613,6 @@ void PythonSupport::initialize(const QString &python_home, const QList<QString> 
 
                         // required to configure the path; see https://bugs.python.org/issue34725
                         QStringList python_paths;
-                        python_paths.append(QDir(python_home).absoluteFilePath("Scripts/python311.zip"));
                         python_paths.append(QDir(python_home).absoluteFilePath("Scripts/python310.zip"));
                         python_paths.append(QDir(python_home).absoluteFilePath("Scripts/python39.zip"));
                         python_paths.append(QDir(python_home).absoluteFilePath("Scripts/python38.zip"));
@@ -668,9 +703,9 @@ QObject *PythonSupport::UnwrapQObject(PyObject *py_obj)
 #if SIMPLE_WRAP
     return static_cast<QObject *>((void *)PyInt_AsLong(py_obj));
 #else
-    QObject *ptr = NULL;
-    if (CALL_PY(PyCapsule_CheckExact)(py_obj))
-        ptr = static_cast<QObject *>(CALL_PY(PyCapsule_GetPointer)(py_obj, PythonSupport::qobject_capsule_name));
+	QObject *ptr = NULL;
+	if (CALL_PY(PyCapsule_CheckExact)(py_obj))
+		ptr = static_cast<QObject *>(CALL_PY(PyCapsule_GetPointer)(py_obj, PythonSupport::qobject_capsule_name));
     return ptr;
 #endif
 }
@@ -864,7 +899,7 @@ QVariant PyObjectToQVariant(PyObject *py_object)
     {
         return CALL_PY(PyObject_IsTrue)(py_object);
     }
-    else if (CALL_PY(PyCapsule_IsValid)(py_object, PythonSupport::qobject_capsule_name))
+	else if (CALL_PY(PyCapsule_IsValid)(py_object, PythonSupport::qobject_capsule_name))
     {
         return QVariant::fromValue(PythonSupport::instance()->UnwrapQObject(py_object));
     }
@@ -928,7 +963,7 @@ void PythonSupport::addResourcePath(const QString &resources_path)
 
 void PythonSupport::addPyObjectToModuleFromQVariant(PyObject* module, const QString &identifier, const QVariant& object)
 {
-    CALL_PY(PyModule_AddObject)(module, identifier.toLatin1().data(), QVariantToPyObject(object));   // steals reference
+	CALL_PY(PyModule_AddObject)(module, identifier.toLatin1().data(), QVariantToPyObject(object));   // steals reference
 }
 
 void PythonSupport::addPyObjectToModule(PyObject* module, const QString &identifier, PyObject *object)
