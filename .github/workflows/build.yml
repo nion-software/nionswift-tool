@@ -455,6 +455,16 @@ jobs:
         pushd nionui_app_test
         python -m pip install .
         popd
+        echo "1>>>>>>>>>>"
+        python --version
+        python -c "import bootstrap"
+        echo "2>>>>>>>>>>"
+        pushd test_venv\Scripts\NionUILauncher
+        echo "2a>>>>>>>>>>"
+        python -c "import bootstrap"
+        echo "2b>>>>>>>>>>"
+        popd
+        echo "3>>>>>>>>>>"
         echo "Running test..."
         ${{ env.tool-exe }} nionui_app.test_ack | grep ACK
         deactivate
