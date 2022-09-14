@@ -1,7 +1,7 @@
 QT += core gui svg widgets
 CONFIG += no_keywords
 
-TARGET = NionSwiftLauncher
+TARGET = NionUILauncher
 TEMPLATE = app
 QMAKE_CXXFLAGS += -m64 -std=c++11 -Wno-unused-parameter -Wno-unused-variable -DDYNAMIC_PYTHON
 INCLUDEPATH += $$(PYTHON_PATH)/include/python3.8 $$(PYTHON_PATH)/lib/python3.8/site-packages/numpy/core/include
