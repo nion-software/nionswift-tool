@@ -3,8 +3,8 @@ import pathlib
 import setuptools
 import sys
 
-tool_id = "nionswift"
-launcher = "NionSwiftLauncher"
+tool_id = "nionui"
+launcher = "NionUILauncher"
 
 version = "0.4.15"
 

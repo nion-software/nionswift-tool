@@ -16,7 +16,7 @@ cmake_minimum_required(VERSION 3.20)
 option(USE_CONSOLE "Enable console" ON)
 
 # app name
-set(APP_NAME "NionSwiftLauncher")
+set(APP_NAME "NionUILauncher")
 
 # app version
 set(APP_VERSION "0.4.15")
