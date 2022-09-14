@@ -483,6 +483,7 @@ jobs:
         conda list
         ${{ env.tool-exe }} nionui_app.test_ack | grep ACK
     - name: Test Conda Forge
+      if: false
       shell: pwsh
       run: |
         # use conda versions instead of pypi versions. install before anything else.
