@@ -167,7 +167,7 @@ PythonSupport::PythonSupport(const QString &python_home, const QString &python_l
             directories << home_dir.absoluteFilePath("../lib") << "/usr/local/Cellar/python@" + version_str;
 
             QStringList variants;
-            variants << "libpython3.10.dylib" << "libpython3.9.dylib" << "libpython3.8.dylib";
+            variants << "libpython3.11.dylib" << "libpython3.10.dylib" << "libpython3.9.dylib" << "libpython3.8.dylib";
 
             Q_FOREACH(const QString &directory, directories)
             {
@@ -184,6 +184,7 @@ PythonSupport::PythonSupport(const QString &python_home, const QString &python_l
     else
     {
         // probably conda or standard Python
+        file_paths.append(QDir(python_home).absoluteFilePath("lib/libpython3.11.dylib"));
         file_paths.append(QDir(python_home).absoluteFilePath("lib/libpython3.10.dylib"));
         file_paths.append(QDir(python_home).absoluteFilePath("lib/libpython3.9.dylib"));
         file_paths.append(QDir(python_home).absoluteFilePath("lib/libpython3.8.dylib"));
@@ -217,9 +218,11 @@ PythonSupport::PythonSupport(const QString &python_home, const QString &python_l
         {
             QDir home_dir(home_bin_path);
             home_dir.cdUp();
+            file_paths.append(home_dir.absoluteFilePath("lib/python3.11/config-3.11-x86_64-linux-gnu/libpython3.11.so"));
             file_paths.append(home_dir.absoluteFilePath("lib/python3.10/config-3.10-x86_64-linux-gnu/libpython3.10.so"));
             file_paths.append(home_dir.absoluteFilePath("lib/python3.9/config-3.9-x86_64-linux-gnu/libpython3.9.so"));
             file_paths.append(home_dir.absoluteFilePath("lib/python3.8/config-3.8-x86_64-linux-gnu/libpython3.8.so"));
+            file_paths.append(home_dir.absoluteFilePath("lib/libpython3.11.so"));
             file_paths.append(home_dir.absoluteFilePath("lib/libpython3.10.so"));
             file_paths.append(home_dir.absoluteFilePath("lib/libpython3.9.so"));
             file_paths.append(home_dir.absoluteFilePath("lib/libpython3.8.so"));
@@ -228,6 +231,7 @@ PythonSupport::PythonSupport(const QString &python_home, const QString &python_l
     else
     {
         // probably conda or standard Python
+        file_paths.append(QDir(python_home).absoluteFilePath("lib/libpython3.11.so"));
         file_paths.append(QDir(python_home).absoluteFilePath("lib/libpython3.10.so"));
         file_paths.append(QDir(python_home).absoluteFilePath("lib/libpython3.9.so"));
         file_paths.append(QDir(python_home).absoluteFilePath("lib/libpython3.8.so"));
@@ -492,7 +496,7 @@ void Python_ThreadAllow::grab()
 
 static wchar_t python_home_static[512];
 static wchar_t python_program_name_static[512];
-static wchar_t python_path_static[512];
+static wchar_t python_path_static[2048];
 
 void PythonSupport::initialize(const QString &python_home, const QList<QString> &python_paths, const QString &python_library)
 {
@@ -573,6 +577,7 @@ void PythonSupport::initialize(const QString &python_home, const QList<QString> 
 
                         // required to configure the path; see https://bugs.python.org/issue34725
                         QStringList python_paths;
+                        python_paths.append(QDir(python_home).absoluteFilePath("Scripts/python311.zip"));
                         python_paths.append(QDir(python_home).absoluteFilePath("Scripts/python310.zip"));
                         python_paths.append(QDir(python_home).absoluteFilePath("Scripts/python39.zip"));
                         python_paths.append(QDir(python_home).absoluteFilePath("Scripts/python38.zip"));
