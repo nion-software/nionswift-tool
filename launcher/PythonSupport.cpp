@@ -394,7 +394,7 @@ PythonSupport::PythonSupport(const QString &python_home, const QString &python_l
     // required, see https://bugs.python.org/issue36085
     AddDllDirectory((PCWSTR)(QDir::toNativeSeparators(QDir(python_home).absoluteFilePath("Library/bin")).utf16()));
 
-    void *dl = LoadLibrary(QDir::toNativeSeparators(file_path).toStdWString().c_str());
+    void *dl = LoadLibrary(reinterpret_cast<LPCWSTR>(QDir::toNativeSeparators(file_path).utf16()););
 #endif
     extern void initialize_pylib(void *);
     initialize_pylib(dl);
