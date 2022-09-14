@@ -181,10 +181,10 @@ endif()
 # Mac Specific
 if (${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
 
-    set(APP_EXECUTABLE "Nion Swift")
+    set(APP_EXECUTABLE "Nion UI Launcher")
     set(CMAKE_OSX_DEPLOYMENT_TARGET 10.14)
     set(MACOSX_BUNDLE_BUNDLE_NAME ${APP_EXECUTABLE})
-    set(MACOSX_BUNDLE_GUI_IDENTIFIER "com.nion.swift.launcher")
+    set(MACOSX_BUNDLE_GUI_IDENTIFIER "com.nion.ui.launcher")
     set(MACOSX_BUNDLE_ICON_FILE "MacIcon.icns")
     #set(MACOSX_BUNDLE_SHORT_VERSION_STRING ${APP_VERSION})
     set(MACOSX_BUNDLE_COPYRIGHT "Copyright © 2012-2021 Nion Company. All rights reserved.")
