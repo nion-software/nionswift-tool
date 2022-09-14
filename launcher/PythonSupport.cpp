@@ -280,6 +280,10 @@ PythonSupport::PythonSupport(const QString &python_home, const QString &python_l
                     {
                         QDir home_dir(QDir::fromNativeSeparators(home_bin_path));
                         python_home_new = home_dir.absolutePath();
+                        file_paths.append(QDir(python_home).absoluteFilePath("Scripts/Python311.dll"));
+                        file_paths.append(QDir(python_home).absoluteFilePath("Python311.dll"));
+                        file_paths.append(QDir(python_home_new).absoluteFilePath("Scripts/Python311.dll"));
+                        file_paths.append(QDir(python_home_new).absoluteFilePath("Python311.dll"));
                         file_paths.append(QDir(python_home).absoluteFilePath("Scripts/Python310.dll"));
                         file_paths.append(QDir(python_home).absoluteFilePath("Python310.dll"));
                         file_paths.append(QDir(python_home_new).absoluteFilePath("Scripts/Python310.dll"));
@@ -299,6 +303,7 @@ PythonSupport::PythonSupport(const QString &python_home, const QString &python_l
     }
     else
     {
+        file_paths.append(QDir(python_home).absoluteFilePath("Python311.dll"));
         file_paths.append(QDir(python_home).absoluteFilePath("Python310.dll"));
         file_paths.append(QDir(python_home).absoluteFilePath("Python39.dll"));
         file_paths.append(QDir(python_home).absoluteFilePath("Python38.dll"));
