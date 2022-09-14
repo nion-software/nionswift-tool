@@ -146,7 +146,7 @@ setuptools.setup(
     license='Apache-2.0',
     author='Nion Software Team',
     author_email='software@nion.com',
-    description='Python command line access to Nion Swift Launcher',
+    description='Python command line access to Nion UI Launcher',
     entry_points={
         'console_scripts': [
             f"{tool_id}-tool=nion.{tool_id}_tool.command:main",

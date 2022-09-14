@@ -1,6 +1,6 @@
-Nion Swift Tool
-===============
-A high performance binary launcher for Nion Swift.
+Nion UI Tool
+============
+A high performance binary launcher for nionui apps.
 
 .. start-badges
 
@@ -11,8 +11,8 @@ A high performance binary launcher for Nion Swift.
       - |version|
 
 
-.. |version| image:: https://img.shields.io/pypi/v/nionswift-tool.svg
-   :target: https://pypi.org/project/nionswift-tool/
+.. |version| image:: https://img.shields.io/pypi/v/nionui-tool.svg
+   :target: https://pypi.org/project/nionui-tool/
    :alt: Latest PyPI version
 
 .. end-badges
@@ -20,4 +20,4 @@ A high performance binary launcher for Nion Swift.
 More Information
 ----------------
 
-- `Changelog <https://github.com/nion-software/nionswift-tool/blob/master/CHANGES.rst>`_
+- `Changelog <https://github.com/nion-software/nionui-tool/blob/master/CHANGES.rst>`_

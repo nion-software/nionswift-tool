@@ -7,7 +7,7 @@ import typing
 import zipfile
 
 owner = "nion-software"
-repo = "nionswift-tool"
+repo = "nionui-tool"
 directory = "upload"
 channel = "nion"
 
