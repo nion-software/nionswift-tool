@@ -19,7 +19,7 @@ option(USE_CONSOLE "Enable console" ON)
 set(APP_NAME "NionSwiftLauncher")
 
 # app version
-set(APP_VERSION "0.4.16")
+set(APP_VERSION "0.4.17")
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/build)
 
@@ -39,7 +39,6 @@ add_compile_definitions(QT_NO_KEYWORDS)
 
 # set up Python
 find_package (Python3 COMPONENTS Development NumPy)
-add_compile_definitions(DYNAMIC_PYTHON=1)
 add_compile_definitions(MS_NO_COREDLL)  # do not allow brain dead library inclusion
 
 # add the executable

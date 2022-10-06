@@ -10,9 +10,12 @@
 #include <QtCore/QFile>
 #include <QtCore/QVariant>
 
+#include "Image.h"
+
 float GetDisplayScaling();
 
 class DocumentWindow;
+class PyObjectPtr;
 
 typedef QList<DocumentWindow *> DocumentWindowList;
 
@@ -33,11 +36,10 @@ public:
     QString resourcesPath() const;
 
     // Python related methods
-    bool hasPyMethod(const QVariant &object, const QString &method);
-    QVariant invokePyMethod(const QVariant &object, const QString &method, const QVariantList &args);
+    QVariant invokePyMethod(PyObjectPtr *object, const QString &method, const QVariantList &args);
     QVariant dispatchPyMethod(const QVariant &object, const QString &method, const QVariantList &args);
-    bool setPyObjectAttribute(const QVariant &object, const QString &attribute, const QVariant &value);
-    QVariant getPyObjectAttribute(const QVariant &object, const QString &attribute);
+    bool setPyObjectAttribute(PyObjectPtr *object, const QString &attribute, const QVariant &value);
+    QVariant getPyObjectAttribute(PyObjectPtr *object, const QString &attribute);
     void closeSplashScreen();
     QFile &getLogFile() { return logFile; }
 
@@ -57,11 +59,63 @@ private:
     QString m_python_library;
     QString m_python_app;
 
-    QVariant m_bootstrap_module;
-
-    QVariant m_py_application;
+    std::unique_ptr<PyObjectPtr> m_bootstrap_module;
+    std::unique_ptr<PyObjectPtr> m_py_application;
 
     friend class DocumentWindow;
+};
+
+struct QImageInterface : public ImageInterface
+{
+    QImage image;
+
+    virtual void create(unsigned int width, unsigned int height, ImageFormat image_type) override
+    {
+        QImage::Format format = QImage::Format_ARGB32;
+        switch (image_type)
+        {
+            case ImageFormat::Format_ARGB32:
+                format = QImage::Format_ARGB32;
+                break;
+            case ImageFormat::Format_Indexed8:
+                format = QImage::Format_Indexed8;
+                break;
+            case ImageFormat::Format_ARGB32_Premultiplied:
+                format = QImage::Format_ARGB32_Premultiplied;
+                break;
+        }
+        image = QImage(width, height, format);
+    }
+
+    virtual unsigned char *scanLine(unsigned int row) override
+    {
+        return image.scanLine(row);
+    }
+
+    virtual const unsigned char *scanLine(unsigned int row) const override
+    {
+        return image.scanLine(row);
+    }
+
+    virtual int width() const override
+    {
+        return image.width();
+    }
+    
+    virtual int height() const override
+    {
+        return image.height();
+    }
+
+    virtual void setColorTable(const std::vector<unsigned int> &colorTable) override
+    {
+        QList<QRgb> colorTableRgb;
+        for (auto value: colorTable)
+        {
+            colorTableRgb.append(static_cast<QRgb>(value));
+        }
+        image.setColorTable(colorTableRgb);
+    }
 };
 
 #endif // APPLICATION_H

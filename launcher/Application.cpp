@@ -7,9 +7,11 @@
 #include "Application.h"
 #include "DocumentWindow.h"
 #include "PythonSupport.h"
+#include "FileSystem.h"
 
 #include <QtCore/QDebug>
 #include <QtCore/QDir>
+#include <QtCore/QDirIterator>
 #include <QtCore/QElapsedTimer>
 #include <QtCore/QMetaType>
 #include <QtCore/QMimeData>
@@ -51,6 +53,212 @@ namespace Qt
     static auto endl = ::endl;
 }
 #endif
+
+template <typename T>
+inline T *Unwrap(PyObject *py_object)
+{
+    return dynamic_cast<T *>(static_cast<QObject *>(PythonSupport::instance()->UnwrapObject(py_object)));
+}
+
+Q_DECLARE_METATYPE(PyObjectPtr)
+
+// static
+int PyObjectPtr_metaId()
+{
+    static bool once = false;
+    static int meta_id = 0;
+    if (!once)
+    {
+        meta_id = qRegisterMetaType<PyObjectPtr>("PyObjectPtr");
+        once = true;
+    }
+    return meta_id;
+}
+
+PythonValueVariant QVariantToPythonValueVariant(const QVariant &value)
+{
+    const void *data = (void *)value.constData();
+    int type = value.userType();
+
+    switch (type)
+    {
+        case QMetaType::Void:
+            return PythonValueVariant();
+
+        case QMetaType::Char:
+            return PythonValueVariant{static_cast<long>(*((char*)data))};
+
+        case QMetaType::UChar:
+            return PythonValueVariant{static_cast<long>(*((unsigned char*)data))};
+
+        case QMetaType::Short:
+            return PythonValueVariant{static_cast<long>(*((short*)data))};
+
+        case QMetaType::UShort:
+            return PythonValueVariant{static_cast<long>(*((unsigned short*)data))};
+
+        case QMetaType::Long:
+            return PythonValueVariant{*((long*)data)};
+
+        case QMetaType::ULong:
+            // does not fit into simple int of python
+            return PythonValueVariant{static_cast<long long>(*((unsigned long*)data))};
+
+        case QMetaType::Bool:
+            return PythonValueVariant{value.toBool()};
+
+        case QMetaType::Int:
+            return PythonValueVariant{static_cast<long>(*((int*)data))};
+
+        case QMetaType::UInt:
+            // does not fit into simple int of python
+            return PythonValueVariant{static_cast<long long>(*((unsigned int*)data))};
+
+        case QMetaType::QChar:
+            return PythonValueVariant{static_cast<long>(*((short*)data))};
+
+        case QMetaType::Float:
+            return PythonValueVariant{static_cast<double>(*((float*)data))};
+
+        case QMetaType::Double:
+            return PythonValueVariant{*((double*)data)};
+
+        case QMetaType::LongLong:
+            return PythonValueVariant{static_cast<long long>(*((qint64*)data))};
+
+        case QMetaType::ULongLong:
+            return PythonValueVariant{static_cast<long long>(*((qint64*)data))};
+
+        case QMetaType::QVariantMap:
+        {
+            std::map<std::string, PythonValueVariant> map;
+            Q_FOREACH(const QString &key, value.toMap().keys())
+            {
+                map.insert(std::pair(key.toStdString(), QVariantToPythonValueVariant(value.toMap().value(key))));
+            }
+            return PythonValueVariant{map};
+        }
+
+        case QMetaType::QVariantList:
+        {
+            std::vector<PythonValueVariant> list;
+            Q_FOREACH(const QVariant &variant, value.toList())
+            {
+                list.push_back(QVariantToPythonValueVariant(variant));
+            }
+            return PythonValueVariant{list};
+        }
+
+        case QMetaType::QString:
+            return PythonValueVariant{static_cast<const QString *>(data)->toStdString()};
+
+        case QMetaType::QStringList:
+        {
+            std::vector<PythonValueVariant> list;
+            Q_FOREACH(const QString &str, value.toStringList())
+            {
+                list.push_back(PythonValueVariant{str.toStdString()});
+            }
+            return PythonValueVariant{list};
+        }
+
+        case QMetaType::QObjectStar:
+        {
+            return PythonValueVariant{value.value<QObject *>()};
+        }
+
+        default:
+        {
+            if (type == PyObjectPtr_metaId())
+            {
+                return PythonValueVariant{*(PyObjectPtr *)data};
+            }
+            else if (type == qMetaTypeId<QList<QUrl>>())
+            {
+                std::vector<PythonValueVariant> list;
+                Q_FOREACH(const QVariant &variant, value.toList())
+                {
+                    list.push_back(PythonValueVariant{variant.toUrl().toString().toStdString()});
+                }
+                return PythonValueVariant{list};
+            }
+        }
+    }
+
+    return PythonValueVariant();
+}
+
+QVariant PythonValueVariantToQVariant(const PythonValueVariant &value_variant)
+{
+    if (value_variant.value.valueless_by_exception())
+    {
+        return QVariant();
+    }
+    else if (std::holds_alternative<bool>(value_variant.value))
+    {
+        return QVariant(*std::get_if<bool>(&value_variant.value));
+    }
+    else if (std::holds_alternative<long>(value_variant.value))
+    {
+        return QVariant(static_cast<int>(*std::get_if<long>(&value_variant.value)));
+    }
+    else if (std::holds_alternative<long long>(value_variant.value))
+    {
+        return QVariant(*std::get_if<long long>(&value_variant.value));
+    }
+    else if (std::holds_alternative<double>(value_variant.value))
+    {
+        return QVariant(*std::get_if<double>(&value_variant.value));
+    }
+    else if (std::holds_alternative<void *>(value_variant.value))
+    {
+        return QVariant::fromValue(static_cast<QObject *>(PythonSupport::instance()->UnwrapObject(static_cast<PyObject *>(*std::get_if<void *>(&value_variant.value)))));
+    }
+    else if (std::holds_alternative<std::string>(value_variant.value))
+    {
+        return QString::fromStdString(*std::get_if<std::string>(&value_variant.value));
+    }
+    else if (std::holds_alternative<std::map<std::string, PythonValueVariant>>(value_variant.value))
+    {
+        QMap<QString, QVariant> map;
+        for (auto item: *std::get_if<std::map<std::string, PythonValueVariant>>(&value_variant.value))
+            map.insert(QString::fromStdString(item.first), PythonValueVariantToQVariant(item.second));
+        return map;
+    }
+    else if (std::holds_alternative<std::vector<PythonValueVariant>>(value_variant.value))
+    {
+        QVariantList list;
+        auto variant_list = std::get_if<std::vector<PythonValueVariant>>(&value_variant.value);
+        for (auto item: *variant_list)
+            list.append(PythonValueVariantToQVariant(item));
+        return list;
+    }
+    else if (std::holds_alternative<PyObjectPtr>(value_variant.value))
+    {
+        const PyObjectPtr *ptr = std::get_if<PyObjectPtr>(&value_variant.value);
+        PyObject *py_object = ptr->get();
+        PyObjectPtr py_object_ptr;
+        py_object_ptr.setPyObject(py_object);
+        return QVariant::fromValue(py_object_ptr);
+    }
+    return QVariant();
+}
+
+QVariant PyObjectToQVariant(PyObject *py_object)
+{
+    return PythonValueVariantToQVariant(PyObjectToValueVariant(py_object));
+}
+
+inline PyObject *WrapQObject(QObject *ptr)
+{
+    return PythonValueVariantToPyObject(QVariantToPythonValueVariant(QVariant::fromValue(static_cast<QObject *>(ptr))));
+}
+
+// New reference
+PyObject *QVariantToPyObject(const QVariant &value)
+{
+    return PythonValueVariantToPyObject(QVariantToPythonValueVariant(value));
+}
 
 QString lastVisitedDir;
 
@@ -1426,10 +1634,11 @@ static PyObject *Core_readImageToBinary(PyObject * /*self*/, PyObject *args)
     {
         Python_ThreadAllow thread_allow;
 
-        QImage image = reader.read();
+        QImageInterface image;
+        image.image = reader.read();
 
-        if (image.format() != QImage::Format_ARGB32_Premultiplied)
-            image = image.convertToFormat(QImage::Format_ARGB32_Premultiplied);
+        if (image.image.format() != QImage::Format_ARGB32_Premultiplied)
+            image.image = image.image.convertToFormat(QImage::Format_ARGB32_Premultiplied);
 
         thread_allow.release();
 
@@ -1513,16 +1722,17 @@ static PyObject *Core_writeBinaryToImage(PyObject * /*self*/, PyObject *args)
     if (!PythonSupport::instance()->parse()(args, "iiOus", &w, &h, &obj0, &filename_u, &format_c))
         return NULL;
 
-    QImage image = PythonSupport::instance()->imageFromRGBA(obj0);
+    QImageInterface image;
+    PythonSupport::instance()->imageFromRGBA(obj0, &image);
 
-    if (image.isNull())
+    if (image.image.isNull())
         return NULL;
 
     // Write the image
     QImageWriter writer(Py_UNICODE_to_QString(filename_u), format_c);
 
     if (writer.canWrite())
-        writer.write(image);
+        writer.write(image.image);
 
     return PythonSupport::instance()->getNoneReturnValue();
 }
@@ -2405,14 +2615,15 @@ static PyObject *Drag_setThumbnail(PyObject * /*self*/, PyObject *args)
 
     if (!PythonSupport::instance()->isNone(obj1))
     {
-        QImage image = PythonSupport::instance()->imageFromRGBA(obj1);
+        QImageInterface image;
+        PythonSupport::instance()->imageFromRGBA(obj1, &image);
 
-        if (image.isNull())
+        if (image.image.isNull())
             return NULL;
 
         float display_scaling = GetDisplayScaling();
 
-        drag->setPixmap(QPixmap::fromImage(image));
+        drag->setPixmap(QPixmap::fromImage(image.image));
         drag->setHotSpot(QPoint(int(x * display_scaling), int(y * display_scaling)));
     }
 
@@ -2471,11 +2682,12 @@ static PyObject *DrawingContext_paintRGBA(PyObject * /*self*/, PyObject *args)
 
     Python_ThreadAllow thread_allow;
 
-    QImage image(width, height, QImage::Format_ARGB32);
-    image.fill(QColor(0,0,0,0));
+    QImageInterface image;
+    image.create(width, height, ImageFormat::Format_ARGB32);
+    image.image.fill(QColor(0,0,0,0));
 
     {
-        QPainter painter(&image);
+        QPainter painter(&image.image);
         PaintImageCache image_cache;
         QList<CanvasDrawingCommand> drawing_commands;
         Q_FOREACH(const QVariant &raw_command_variant, raw_commands)
@@ -2489,8 +2701,8 @@ static PyObject *DrawingContext_paintRGBA(PyObject * /*self*/, PyObject *args)
         PaintCommands(painter, drawing_commands, &image_cache, 1.0);
     }
 
-    if (image.format() != QImage::Format_ARGB32_Premultiplied)
-        image = image.convertToFormat(QImage::Format_ARGB32_Premultiplied);
+    if (image.image.format() != QImage::Format_ARGB32_Premultiplied)
+        image.image = image.image.convertToFormat(QImage::Format_ARGB32_Premultiplied);
 
     thread_allow.release();
 
@@ -2510,11 +2722,12 @@ static PyObject *DrawingContext_paintRGBA_binary(PyObject * /*self*/, PyObject *
 
     Python_ThreadAllow thread_allow;
 
-    QImage image(width, height, QImage::Format_ARGB32);
-    image.fill(QColor(0,0,0,0));
+    QImageInterface image;
+    image.create(width, height, ImageFormat::Format_ARGB32);
+    image.image.fill(QColor(0,0,0,0));
 
     {
-        QPainter painter(&image);
+        QPainter painter(&image.image);
         PaintImageCache image_cache;
         LayerCache layer_cache;
         std::vector<quint32> commands;
@@ -2522,8 +2735,8 @@ static PyObject *DrawingContext_paintRGBA_binary(PyObject * /*self*/, PyObject *
         PaintBinaryCommands(&painter, commands, imageMap, &image_cache, &layer_cache, 1.0);
     }
 
-    if (image.format() != QImage::Format_ARGB32_Premultiplied)
-        image = image.convertToFormat(QImage::Format_ARGB32_Premultiplied);
+    if (image.image.format() != QImage::Format_ARGB32_Premultiplied)
+        image.image = image.image.convertToFormat(QImage::Format_ARGB32_Premultiplied);
 
     thread_allow.release();
 
@@ -3332,7 +3545,11 @@ static PyObject *MimeData_formats(PyObject * /*self*/, PyObject *args)
     if (mime_data == NULL)
         return NULL;
 
-    return PythonSupport::instance()->getPyListFromStrings(mime_data->formats());
+    std::vector<std::string> formats;
+    Q_FOREACH(const QString &format, mime_data->formats())
+        formats.push_back(format.toStdString());
+
+    return PythonSupport::instance()->getPyListFromStrings(formats);
 }
 
 static PyObject *MimeData_setDataAsString(PyObject * /*self*/, PyObject *args)
@@ -3404,14 +3621,15 @@ static PyObject *PushButton_setIcon(PyObject * /*self*/, PyObject *args)
 
     if (!PythonSupport::instance()->isNone(obj1))
     {
-        QImage image = PythonSupport::instance()->imageFromRGBA(obj1);
+        QImageInterface image;
+        PythonSupport::instance()->imageFromRGBA(obj1, &image);
 
-        if (image.isNull())
+        if (image.image.isNull())
             return NULL;
 
         float display_scaling = GetDisplayScaling();
 
-        push_button->setIcon(QIcon(QPixmap::fromImage(image)));
+        push_button->setIcon(QIcon(QPixmap::fromImage(image.image)));
         push_button->setIconSize(QSize(width * display_scaling, height * display_scaling));
     }
     else
@@ -3534,14 +3752,15 @@ static PyObject *RadioButton_setIcon(PyObject * /*self*/, PyObject *args)
 
     if (!PythonSupport::instance()->isNone(obj1))
     {
-        QImage image = PythonSupport::instance()->imageFromRGBA(obj1);
+        QImageInterface image;
+        PythonSupport::instance()->imageFromRGBA(obj1, &image);
 
-        if (image.isNull())
+        if (image.image.isNull())
             return NULL;
 
         float display_scaling = GetDisplayScaling();
 
-        radio_button->setIcon(QIcon(QPixmap::fromImage(image)));
+        radio_button->setIcon(QIcon(QPixmap::fromImage(image.image)));
         radio_button->setIconSize(QSize(width * display_scaling, height * display_scaling));
     }
     else
@@ -5883,6 +6102,8 @@ Application::Application(int & argv, char **args)
     // TODO: Handle case where python home exists.
 
     m_python_home = argv > 1 ? QString::fromUtf8(args[1]) : QString();
+
+    PyObjectPtr_metaId();
 }
 
 static PyMethodDef Methods[] = {
@@ -6125,6 +6346,108 @@ PyObject* InitializeHostLibModule()
     return module;
 }
 
+class QFileSystem : public FileSystem
+{
+public:
+    std::string absoluteFilePath(const std::string &dir, const std::string &fileName)
+    {
+        return QDir(QString::fromStdString(dir)).absoluteFilePath(QString::fromStdString(fileName)).toStdString();
+    }
+
+    bool exists(const std::string &filePath)
+    {
+        return QFile(QString::fromStdString(filePath)).exists();
+    }
+
+    std::string toNativeSeparators(const std::string &filePath)
+    {
+        return QDir::toNativeSeparators(QString::fromStdString(filePath)).toStdString();
+    }
+
+    bool parseConfigFile(const std::string &filePath, std::string &home, std::string &version)
+    {
+        QSettings settings(QString::fromStdString(filePath), QSettings::IniFormat);
+
+        // this code makes me hate both Windows and Qt equally. it is necessary to handle backslashes in paths.
+        QFile file(QString::fromStdString(filePath));
+        if (file.open(QFile::ReadOnly))
+        {
+            QByteArray bytes = file.readAll();
+            QString str = QString::fromUtf8(bytes);
+            Q_FOREACH(const QString &line, str.split(QRegularExpression("[\r\n]"), Qt::SkipEmptyParts))
+            {
+                QRegularExpression re("^home\\s?=\\s?(.+)$");
+                QRegularExpressionMatch match = re.match(line);
+                if (match.hasMatch())
+                {
+                    QString home_bin_path = match.captured(1).trimmed();
+                    if (!home_bin_path.isEmpty())
+                    {
+                        QString version_str = settings.value("version").toString();
+                        QRegularExpression re("(\\d+)\\.(\\d+)(\\.\\d+)?");
+                        QRegularExpressionMatch match = re.match(version_str);
+                        if (match.hasMatch())
+                            version_str = QString::number(match.captured(1).toInt()) + "." + QString::number(match.captured(2).toInt());
+                        home = QDir::fromNativeSeparators(home_bin_path).toStdString();
+                        version = version_str.toStdString();
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    void iterateDirectory(const std::string &directoryPath, const std::list<std::string> &nameFilters, std::list<std::string> &filePaths)
+    {
+        QStringList nameFiltersQ;
+        for (auto nameFilter : nameFilters)
+            nameFiltersQ.append(QString::fromStdString(nameFilter));
+        QDirIterator it(QString::fromStdString(directoryPath), nameFiltersQ, QDir::NoFilter, QDirIterator::Subdirectories);
+        while (it.hasNext())
+            filePaths.push_back(it.next().toStdString());
+    }
+
+    std::string directoryName(const std::string &filePath)
+    {
+        QFileInfo fileInfo(QString::fromStdString(filePath));
+        if (fileInfo.isDir())
+            return fileInfo.fileName().toStdString();
+        else
+            return fileInfo.absoluteDir().dirName().toStdString();
+    }
+
+    std::string directory(const std::string &filePath)
+    {
+        return QFileInfo(QString::fromStdString(filePath)).absoluteDir().canonicalPath().toStdString();
+    }
+
+    std::string parentDirectory(const std::string &filePath)
+    {
+        QFileInfo fileInfo(QString::fromStdString(filePath));
+        if (fileInfo.isDir())
+        {
+            return fileInfo.absoluteDir().canonicalPath().toStdString();
+        }
+        else
+        {
+            QDir d = fileInfo.absoluteDir();
+            d.cdUp();
+            return d.absolutePath().toStdString();
+        }
+    }
+
+    void putEnv(const std::string &key, const std::string &value)
+    {
+        qputenv(key.c_str(), value.c_str());
+    }
+
+    std::string getEnv(const std::string &key)
+    {
+        return QString::fromLocal8Bit(qgetenv(key.c_str())).toStdString();
+    }
+};
+
 bool Application::initialize()
 {
     if (arguments().length() < 2 || !QDir(arguments()[1]).exists())
@@ -6132,6 +6455,8 @@ bool Application::initialize()
         // try reading the config file
         QDir base_dir(QCoreApplication::applicationDirPath());
         QString config_file_path = base_dir.absoluteFilePath("toolconfig.toml");
+        if (!QFileInfo(config_file_path).exists())
+            config_file_path = base_dir.absoluteFilePath("../Resources/toolconfig.toml");
         QFile config_file(config_file_path);
         if (config_file.open(QIODevice::ReadOnly))
         {
@@ -6189,19 +6514,25 @@ bool Application::initialize()
         m_python_paths.append(m_python_home);
     }
 
-    m_python_home = PythonSupport::ensurePython(m_python_home);
+    FileSystem *fs = new QFileSystem();
+
+    m_python_home = QString::fromStdString(PythonSupport::ensurePython(fs, m_python_home.toStdString()));
 #if !defined(DEBUG)
     if (m_python_home.isEmpty() || !QFile(m_python_home).exists())
         return false;
 #endif
 
-    PythonSupport::initInstance(m_python_home, m_python_library);
+    PythonSupport::initInstance(fs, m_python_home.toStdString(), m_python_library.toStdString());
 
     if (PythonSupport::instance()->isValid())
     {
         PythonSupport::instance()->initializeModule("HostLib", &InitializeHostLibModule);
 
-        PythonSupport::instance()->initialize(m_python_home, m_python_paths, m_python_library);  // initialize Python support
+        std::list<std::string> pythonPaths;
+        Q_FOREACH(const QString &pythonPath, m_python_paths)
+            pythonPaths.push_back(pythonPath.toStdString());
+
+        PythonSupport::instance()->initialize(m_python_home.toStdString(), pythonPaths, m_python_library.toStdString());  // initialize Python support
 
         QString bootstrap_error;
 
@@ -6211,24 +6542,23 @@ bool Application::initialize()
             // Add the resources path so that the Python imports work. This is necessary to find bootstrap.py,
             // which may not be in the same directory as the executable (specifically for Mac OS where things
             // are arranged into a bundle).
-            PythonSupport::instance()->addResourcePath(resourcesPath());
+            PythonSupport::instance()->addResourcePath(resourcesPath().toStdString());
 
             // Bootstrap the python stuff.
-            PyObject *module = PythonSupport::instance()->import("bootstrap");
             PythonSupport::instance()->printAndClearErrors();
-            m_bootstrap_module = PyObjectToQVariant(module); // new reference
+            m_bootstrap_module = std::unique_ptr<PyObjectPtr>(new PyObjectPtr(PythonSupport::instance()->import("bootstrap"))); // new reference
             PythonSupport::instance()->printAndClearErrors();
             QVariantList args;
             if (m_python_app.isEmpty())
                 args << arguments();
             else
                 args << (QStringList() << arguments()[0] << m_python_home << m_python_app);
-            QVariant bootstrap_result = invokePyMethod(m_bootstrap_module, "bootstrap_main", args);
-            m_py_application = bootstrap_result.toList()[0];
+            QVariant bootstrap_result = invokePyMethod(m_bootstrap_module.get(), "bootstrap_main", args);
+            m_py_application = std::unique_ptr<PyObjectPtr>(new PyObjectPtr(bootstrap_result.toList()[0].value<PyObjectPtr>()));
             bootstrap_error = bootstrap_result.toList()[1].toString();
 
-            if (!m_py_application.isNull())
-                return invokePyMethod(m_py_application, "start", QVariantList()).toBool();
+            if (m_py_application->isValid())
+                return invokePyMethod(m_py_application.get(), "start", QVariantList()).toBool();
         }
 
         if (bootstrap_error == "python36" || bootstrap_error == "python37")
@@ -6251,15 +6581,15 @@ Application::~Application()
 
 void Application::deinitialize()
 {
-    m_bootstrap_module.clear();
-    m_py_application.clear();
+    m_bootstrap_module.reset();
+    m_py_application.reset();
     PythonSupport::instance()->deinitialize();
     PythonSupport::deinitInstance();
 }
 
 void Application::aboutToQuit()
 {
-    invokePyMethod(m_py_application, "stop", QVariantList());
+    invokePyMethod(m_py_application.get(), "stop", QVariantList());
 }
 
 QString Application::resourcesPath() const
@@ -6272,29 +6602,29 @@ QString Application::resourcesPath() const
 #endif
 }
 
-bool Application::hasPyMethod(const QVariant &object, const QString &method)
+QVariant Application::invokePyMethod(PyObjectPtr *object, const QString &method, const QVariantList &qargs)
 {
-    return PythonSupport::instance()->hasPyMethod(object, method);
+    std::list<PythonValueVariant> args;
+    Q_FOREACH(const QVariant &variant, qargs)
+    {
+        args.push_back(QVariantToPythonValueVariant(variant));
+    }
+    return PythonValueVariantToQVariant(PythonSupport::instance()->invokePyMethod(object, method.toStdString(), args));
 }
 
-QVariant Application::invokePyMethod(const QVariant &object, const QString &method, const QVariantList &args)
+bool Application::setPyObjectAttribute(PyObjectPtr *object, const QString &attribute, const QVariant &value)
 {
-    return PythonSupport::instance()->invokePyMethod(object, method, args);
+    return PythonSupport::instance()->setAttribute(object, attribute.toStdString(), QVariantToPythonValueVariant(value));
 }
 
-bool Application::setPyObjectAttribute(const QVariant &object, const QString &attribute, const QVariant &value)
+QVariant Application::getPyObjectAttribute(PyObjectPtr *object, const QString &attribute)
 {
-    return PythonSupport::instance()->setAttribute(object, attribute, value);
-}
-
-QVariant Application::getPyObjectAttribute(const QVariant &object, const QString &attribute)
-{
-    return PythonSupport::instance()->getAttribute(object, attribute);
+    return PythonValueVariantToQVariant(PythonSupport::instance()->getAttribute(object, attribute.toStdString()));
 }
 
 QVariant Application::dispatchPyMethod(const QVariant &object, const QString &method, const QVariantList &args)
 {
-    return invokePyMethod(m_bootstrap_module, "bootstrap_dispatch", QVariantList() << object << method << QVariant(args));
+    return invokePyMethod(m_bootstrap_module.get(), "bootstrap_dispatch", QVariantList() << object << method << QVariant(args));
 }
 
 void Application::closeSplashScreen()

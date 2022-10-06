@@ -3,7 +3,7 @@ CONFIG += no_keywords
 
 TARGET = NionSwiftLauncher
 TEMPLATE = app
-QMAKE_CXXFLAGS += -m64 -std=c++11 -Wno-unused-parameter -Wno-unused-variable -DDYNAMIC_PYTHON
+QMAKE_CXXFLAGS += -m64 -std=c++11 -Wno-unused-parameter -Wno-unused-variable
 INCLUDEPATH += $$(PYTHON_PATH)/include/python3.8 $$(PYTHON_PATH)/lib/python3.8/site-packages/numpy/core/include
 SOURCES +=\
     main.cpp \
@@ -16,6 +16,7 @@ SOURCES +=\
 HEADERS  += \
     DocumentWindow.h \
     Application.h \
+    Image.h \
     PythonSelectDialog.h \
     PythonStubs.h \
     PythonSupport.h

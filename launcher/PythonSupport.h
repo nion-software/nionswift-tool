@@ -2,14 +2,22 @@
  Copyright (c) 2012-2015 Nion Company.
 */
 
-#include <QtGui/QImage>
-
 #ifndef PYTHON_SUPPORT_H
 #define PYTHON_SUPPORT_H
+
+#include <algorithm>
+#include <list>
+#include <map>
+#include <memory>
+#include <string>
+#include <utility>
+#include <variant>
+#include <vector>
 
 #pragma push_macro("_DEBUG")
 #undef _DEBUG
 #define PY_SSIZE_T_CLEAN
+#define MS_NO_COREDLL 1
 #include <Python.h>
 #pragma pop_macro("_DEBUG")
 
@@ -48,14 +56,75 @@ private:
     Python_ThreadAllowState *m_state;
 };
 
-PyObject *WrapQObject(QObject *ptr);
+class PyObjectPtr
+{
+public:
+    PyObjectPtr(PyObject *py_object = nullptr, bool borrowed = false) : py_object(py_object)
+    {
+        if (borrowed)
+        {
+            Python_ThreadBlock thread_block;
+            Py_INCREF(py_object);
+        }
+    }
+    PyObjectPtr(const PyObjectPtr &py_object_ptr)
+    {
+        Python_ThreadBlock thread_block;
+        py_object = py_object_ptr.get();
+        Py_INCREF(py_object);
+    }
+    ~PyObjectPtr()
+    {
+        Python_ThreadBlock thread_block;
+        Py_XDECREF(this->py_object);
+    }
+    PyObjectPtr &operator=(const PyObjectPtr &) = delete;
+    PyObject *get() const { return this->py_object; }
+    PyObject *release()
+    {
+        PyObject *py_object = this->py_object;
+        this->py_object = nullptr;
+        return py_object;
+    }
+    bool isValid() const { return py_object != nullptr; }
+    operator PyObject*() const { return py_object; }
+    void setPyObject(PyObject *py_object)
+    {
+        Python_ThreadBlock thread_block;
+        Py_XDECREF(this->py_object);
+        Py_INCREF(py_object);
+        this->py_object = py_object;
+    }
 
-QVariant PyObjectToQVariant(PyObject *py_object);
-PyObject *QVariantToPyObject(const QVariant &value);
-PyObject* QStringToPyObject(const QString& str);
-void FreePyObject(PyObject *py_object);
+private:
+    PyObject *py_object;
+};
+
+struct PythonValueVariant {
+    std::variant<
+        std::nullptr_t,
+        bool,
+        long,
+        long long,
+        double,
+        void *,
+        std::string,
+        std::map<std::string, PythonValueVariant>,
+        std::vector<PythonValueVariant>,
+        PyObjectPtr
+    > value;
+};
+
+PythonValueVariant PyObjectToValueVariant(PyObject *py_object);
+PyObject *PythonValueVariantToPyObject(const PythonValueVariant &value_variant);
+
+class ImageInterface;
 
 typedef PyObject *CreateAndAddModuleFn();
+
+class FileSystem;
+
+class PlatformSupport;
 
 class PythonSupport
 {
@@ -66,28 +135,25 @@ public:
     static PythonSupport *instance();
 
     // only called once
-    static void initInstance(const QString &python_home, const QString &python_library);
+    static void initInstance(FileSystem *fs, const std::string &python_home, const std::string &python_library);
     static void deinitInstance();
 
-    static QString ensurePython(const QString &python_home);
+    static std::string ensurePython(FileSystem *fs, const std::string &python_home);
 
-    void initialize(const QString &python_home, const QList<QString> &python_paths, const QString &python_library);
+    void initialize(const std::string &python_home, const std::list<std::string> &python_paths, const std::string &python_library);
     void deinitialize();
-    void addResourcePath(const QString &resources_path);
-	void addPyObjectToModuleFromQVariant(PyObject* module, const QString &identifier, const QVariant& object);
-	void addPyObjectToModule(PyObject* module, const QString &identifier, PyObject *object);
-    QImage imageFromRGBA(PyObject *ndarray_py);
-    QImage scaledImageFromRGBA(PyObject *ndarray_py, const QSize &destination_size);
-    QImage imageFromArray(PyObject *ndarray_py, float display_limit_low, float display_limit_high, PyObject *lookup_table);
-    QImage scaledImageFromArray(PyObject *ndarray_py, const QSizeF &destination_size, float context_scaling, float display_limit_low, float display_limit_high, PyObject *lookup_table);
-    PyObject *arrayFromImage(const QImage &image);
+    void addResourcePath(const std::string &resources_path);
+    void imageFromRGBA(PyObject *ndarray_py, ImageInterface *image);
+    void scaledImageFromRGBA(PyObject *ndarray_py, unsigned int width, unsigned int height, ImageInterface *image);
+    void imageFromArray(PyObject *ndarray_py, float display_limit_low, float display_limit_high, PyObject *lookup_table, ImageInterface *image);
+    void scaledImageFromArray(PyObject *ndarray_py, float width, float height, float context_scaling, float display_limit_low, float display_limit_high, PyObject *lookup_table, ImageInterface *image);
+    PyObject *arrayFromImage(const ImageInterface &image);
     void bufferRelease(Py_buffer *buffer);
-    bool hasPyMethod(const QVariant &object, const QString &method);
-    QVariant invokePyMethod(const QVariant &object, const QString &method, const QVariantList &args);
-    bool setAttribute(const QVariant &object, const QString &attribute, const QVariant &value);
-    QVariant getAttribute(const QVariant &object, const QString &attribute);
-    void setErrorString(const QString &error_string);
-    PyObject *getPyListFromStrings(const QStringList &strings);
+    PythonValueVariant invokePyMethod(PyObjectPtr *object, const std::string &method, const std::list<PythonValueVariant> &args);
+    bool setAttribute(PyObjectPtr *object, const std::string &attribute, const PythonValueVariant &value);
+    PythonValueVariant getAttribute(PyObjectPtr *object, const std::string &attribute);
+    void setErrorString(const std::string &error_string);
+    PyObject *getPyListFromStrings(const std::vector<std::string> &strings);
     PyArg_ParseTupleFn parse();
     Py_BuildValueFn build();
     PyObject *getNoneReturnValue();
@@ -97,12 +163,12 @@ public:
     void initializeModule(const char *name, CreateAndAddModuleFn fn);
     void printAndClearErrors();
     PyObject *import(const char *name);
-    QObject *UnwrapQObject(PyObject *py_object);
-	static const char* qobject_capsule_name;
+    void *UnwrapObject(PyObject *py_object);
+    static const char* qobject_capsule_name;
 
     bool isValid() const { return m_valid; }
 private:
-    PythonSupport(const QString &python_home, const QString &python_library); // ctor hidden
+    PythonSupport(FileSystem *fs, const std::string &python_home, const std::string &python_library); // ctor hidden
     PythonSupport(PythonSupport const&); // copy ctor hidden
     PythonSupport& operator=(PythonSupport const&); // assign op. hidden
     ~PythonSupport(); // dtor hidden
@@ -112,7 +178,13 @@ private:
     PyThreadState *m_initial_state;
 
     // actual python home after following venv
-    QString m_actual_python_home;
+    std::string m_actual_python_home;
+
+    // file system
+    std::unique_ptr<FileSystem> fs;
+
+    // platform support
+    std::unique_ptr<PlatformSupport> ps;
 
     // whether dl loaded
     bool m_valid;
@@ -124,7 +196,5 @@ private:
     // exceptions
     PyObject *module_exception;
 };
-
-template <typename T> inline T *Unwrap(PyObject *py_object) { return dynamic_cast<T *>(PythonSupport::instance()->UnwrapQObject(py_object)); }
 
 #endif // PYTHON_SUPPORT_H

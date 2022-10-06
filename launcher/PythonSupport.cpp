@@ -3,35 +3,38 @@
 */
 
 #include <stdint.h>
+#include <iostream>
 
-#include <QtCore/QDebug>
-#include <QtCore/QDir>
-#include <QtCore/QDirIterator>
-#include <QtCore/QFile>
-#include <QtCore/QFileInfo>
-#include <QtCore/QMetaType>
-#include <QtCore/QObject>
-#include <QtCore/QProcessEnvironment>
-#include <QtCore/QRegularExpression>
-#include <QtCore/QSettings>
-#include <QtCore/QStandardPaths>
-#include <QtCore/QStringList>
-#include <QtCore/QUrl>
-#include <QtCore/QVariant>
+#if defined(_WIN32) || defined(_WIN64)
+#define OS_WINDOWS 1
+#else
+#define OS_WINDOWS 0
+#endif
 
-#include <QtWidgets/QApplication>
+#if defined(__APPLE__)
+#define OS_MACOS 1
+#else
+#define OS_MACOS 0
+#endif
 
-#if defined(DYNAMIC_PYTHON) && DYNAMIC_PYTHON
-#if !defined(Q_OS_WIN)
+#if defined(__linux__)
+#define OS_LINUX 1
+#else
+#define OS_LINUX 0
+#endif
+
+#if !OS_WINDOWS
 #include <dlfcn.h>
 #define LOOKUP_SYMBOL dlsym
 #else
 #define LOOKUP_SYMBOL GetProcAddress
 #endif
-#endif
 
 #include "PythonSupport.h"
 #include "PythonStubs.h"
+
+#include "Image.h"
+#include "FileSystem.h"
 
 #define NPY_NO_DEPRECATED_API NPY_1_19_API_VERSION
 #define PY_ARRAY_UNIQUE_SYMBOL d2af2aa3297e
@@ -39,7 +42,6 @@
 #pragma push_macro("_DEBUG")
 #undef _DEBUG
 
-#if defined(DYNAMIC_PYTHON) && DYNAMIC_PYTHON
 // numpy uses these functions, so to allow linking to occur
 // override them here and redefine them with the dynamic
 // python versions.
@@ -54,6 +56,7 @@
 #pragma push_macro("PyImport_ImportModule")
 #pragma push_macro("PyObject_HasAttrString")
 #pragma push_macro("PyObject_GetAttrString")
+
 #undef PyCapsule_CheckExact
 #define PyCapsule_CheckExact DPyCapsule_CheckExact
 #define PyCapsule_GetPointer DPyCapsule_GetPointer
@@ -66,19 +69,15 @@
 #define PyImport_ImportModule DPyImport_ImportModule
 #define PyObject_GetAttrString DPyObject_GetAttrString
 #define PyObject_HasAttrString DPyObject_HasAttrString
-#endif
 
 #include "numpy/arrayobject.h"
 #include "structmember.h"
-
-#define SIMPLE_WRAP 0
 
 static void* init_numpy() {
     import_array();
     return NULL;
 }
 
-#if defined(DYNAMIC_PYTHON) && DYNAMIC_PYTHON
 #pragma pop_macro("PyCapsule_CheckExact")
 #pragma pop_macro("PyCapsule_GetPointer")
 #pragma pop_macro("PyErr_Format")
@@ -87,42 +86,30 @@ static void* init_numpy() {
 #pragma pop_macro("PyExc_AttributeError")
 #pragma pop_macro("PyExc_ImportError")
 #pragma pop_macro("PyExc_RuntimeError")
-#endif
 
 #pragma pop_macro("_DEBUG")
 
-#if defined(Q_OS_WIN)
+#if OS_WINDOWS
 #include <Windows.h>
 #include <WinBase.h>
-#endif
-
-#if QT_VERSION < QT_VERSION_CHECK(5, 14, 0)
-namespace Qt
-{
-    static auto endl = ::endl;
-}
 #endif
 
 static PythonSupport *thePythonSupport = NULL;
 const char* PythonSupport::qobject_capsule_name = "b93c9a511d32.qobject";
 
-QString PythonSupport::ensurePython(const QString &python_home)
+std::string PythonSupport::ensurePython(FileSystem *fs, const std::string &python_home)
 {
-#if defined(DYNAMIC_PYTHON) && DYNAMIC_PYTHON
-    QTextStream cout(stdout);
-
-    if (!python_home.isEmpty() && QFile(python_home).exists())
+    if (!python_home.empty() && fs->exists(python_home))
     {
-        cout << "Using Python environment: " << python_home << Qt::endl;
+        std::cout << "Using Python environment: " << python_home << std::endl;
         return python_home;
     }
-#endif
-    return QString();
+    return std::string();
 }
 
-void PythonSupport::initInstance(const QString &python_home, const QString &python_library)
+void PythonSupport::initInstance(FileSystem *fs, const std::string &python_home, const std::string &python_library)
 {
-    thePythonSupport = new PythonSupport(python_home, python_library);
+    thePythonSupport = new PythonSupport(fs, python_home, python_library);
 }
 
 void PythonSupport::deinitInstance()
@@ -136,236 +123,355 @@ PythonSupport *PythonSupport::instance()
     return thePythonSupport;
 }
 
-PythonSupport::PythonSupport(const QString &python_home, const QString &python_library)
-    : module_exception(NULL)
+class PlatformSupport
 {
-#if defined(DYNAMIC_PYTHON) && DYNAMIC_PYTHON
-#if defined(Q_OS_MAC)
-    QStringList file_paths;
-    QString file_path;
-    QString venv_conf_file_name = QDir(python_home).absoluteFilePath("pyvenv.cfg");
-    if (!python_library.isEmpty())
+public:
+    virtual ~PlatformSupport();
+    virtual void loadLibrary(FileSystem *fs, const std::string &python_home, const std::string &filePath) = 0;
+    virtual void *lookupSymbol(const std::string &symbolName) = 0;
+    virtual bool isValid() const = 0;
+    virtual void buildVirtualEnvironmentPaths(FileSystem *fs, const std::string &python_home, const std::string &home_bin_path, const std::string &version, std::list<std::string> &filePaths) = 0;
+    virtual void buildStandardPaths(FileSystem *fs, const std::string &python_home, std::list<std::string> &filePaths) = 0;
+    virtual std::string findLandmarkLibrary(FileSystem *fs, const std::string &filePath) = 0;
+    virtual std::string findProgramName(FileSystem *fs, const std::string &python_home) = 0;
+    virtual std::string joinedPathSeparator() = 0;
+    virtual void buildLibraryPaths(FileSystem *fs, const std::string &python_home, const std::string &python_home_new, std::list<std::string> &filePaths) = 0;
+};
+
+PlatformSupport::~PlatformSupport()
+{
+}
+
+#if OS_MACOS
+class MacSupport : public PlatformSupport
+{
+    void *dl;
+public:
+    MacSupport() : dl(nullptr) { }
+    ~MacSupport()
     {
-        file_paths.append(python_library);
+        extern void deinitialize_pylib();
+        deinitialize_pylib();
+        if (dl != nullptr)
+            dlclose(dl);
+        dl = nullptr;
     }
-    else if (QFile(venv_conf_file_name).exists())
+
+    virtual void loadLibrary(FileSystem *fs, const std::string &python_home, const std::string &filePath) override
     {
-        // probably Python w/ virtual environment
-        QSettings settings(venv_conf_file_name, QSettings::IniFormat);
-        QString home_bin_path = settings.value("home").toString();
-        if (!home_bin_path.isEmpty())
+        dl = dlopen(filePath.c_str(), RTLD_LAZY);
+        extern void initialize_pylib(void *);
+        initialize_pylib(dl);
+    }
+
+    virtual void *lookupSymbol(const std::string &symbolName) override
+    {
+        return dlsym(dl, symbolName.c_str());
+    }
+
+    virtual bool isValid() const override
+    {
+        return dl != nullptr;
+    }
+
+    virtual void buildVirtualEnvironmentPaths(FileSystem *fs, const std::string &python_home, const std::string &home_bin_path, const std::string &version, std::list<std::string> &filePaths) override
+    {
+        std::list<std::string> directories;
+        directories.push_back(fs->absoluteFilePath(home_bin_path, "../lib"));
+        directories.push_back(fs->absoluteFilePath(home_bin_path, "/usr/local/Cellar/python@" + version));
+
+        std::list<std::string> variants;
+        variants.push_back("libpython3.11.dylib");
+        variants.push_back("libpython3.10.dylib");
+        variants.push_back("libpython3.9.dylib");
+        variants.push_back("libpython3.8.dylib");
+
+        for (auto directory: directories)
         {
-            QString version_str = settings.value("version").toString();
-            QRegularExpression re("(\\d+)\\.(\\d+)(\\.\\d+)?");
-            QRegularExpressionMatch match = re.match(version_str);
-            if (match.hasMatch())
-                version_str = QString::number(match.captured(1).toInt()) + "." + QString::number(match.captured(2).toInt());
-
-            QDir home_dir(home_bin_path);
-
-            QStringList directories;
-            directories << home_dir.absoluteFilePath("../lib") << "/usr/local/Cellar/python@" + version_str;
-
-            QStringList variants;
-            variants << "libpython3.11.dylib" << "libpython3.10.dylib" << "libpython3.9.dylib" << "libpython3.8.dylib";
-
-            Q_FOREACH(const QString &directory, directories)
-            {
-                QDirIterator it(directory, variants, QDir::NoFilter, QDirIterator::Subdirectories);
-                while (it.hasNext())
-                {
-                    QString file_path = it.next();
-                    if (QFileInfo(file_path).absoluteDir().dirName() == "lib")
-                        file_paths.append(file_path);
-                }
-            }
+            std::list<std::string> directoryFilePaths;
+            fs->iterateDirectory(directory, variants, directoryFilePaths);
+            for (auto filePath : directoryFilePaths)
+                if (fs->directoryName(filePath) == "lib")
+                    filePaths.push_back(filePath);
         }
+    }
+
+    virtual void buildStandardPaths(FileSystem *fs, const std::string &python_home, std::list<std::string> &filePaths) override
+    {
+        filePaths.push_back(fs->absoluteFilePath(python_home, "lib/libpython3.11.dylib"));
+        filePaths.push_back(fs->absoluteFilePath(python_home, "lib/libpython3.10.dylib"));
+        filePaths.push_back(fs->absoluteFilePath(python_home, "lib/libpython3.9.dylib"));
+        filePaths.push_back(fs->absoluteFilePath(python_home, "lib/libpython3.8.dylib"));
+    }
+
+    virtual void buildLibraryPaths(FileSystem *fs, const std::string &python_home, const std::string &python_home_new, std::list<std::string> &filePaths) override
+    {
+    }
+
+    virtual std::string findLandmarkLibrary(FileSystem *fs, const std::string &filePath) override
+    {
+        return fs->parentDirectory(filePath);
+    }
+
+    virtual std::string findProgramName(FileSystem *fs, const std::string &python_home) override
+    {
+        return fs->absoluteFilePath(python_home, "bin/python3");
+    }
+
+    virtual std::string joinedPathSeparator() override
+    {
+        return ":";
+    }
+};
+#endif
+
+#if OS_LINUX
+class LinuxSupport : public PlatformSupport
+{
+    void *dl;
+public:
+    LinuxSupport() : dl(nullptr) { }
+    ~LinuxSupport()
+    {
+        extern void deinitialize_pylib();
+        deinitialize_pylib();
+        if (dl != nullptr)
+            dlclose(dl);
+        dl = nullptr;
+    }
+
+    virtual void loadLibrary(FileSystem *fs, const std::string &python_home, const std::string &filePath) override
+    {
+        dl = dlopen(filePath.c_str(), RTLD_LAZY | RTLD_GLOBAL);
+        extern void initialize_pylib(void *);
+        initialize_pylib(dl);
+    }
+
+    virtual void *lookupSymbol(const std::string &symbolName) override
+    {
+        return dlsym(dl, symbolName.c_str());
+    }
+
+    virtual bool isValid() const override
+    {
+        return dl != nullptr;
+    }
+
+    virtual void buildVirtualEnvironmentPaths(FileSystem *fs, const std::string &python_home, const std::string &home_bin_path, const std::string &version, std::list<std::string> &filePaths) override
+    {
+        std::string homeParentDirectory = fs->parentDirectory(home_bin_path);
+        filePaths.push_back(fs->absoluteFilePath(homeParentDirectory, "lib/python3.11/config-3.11-x86_64-linux-gnu/libpython3.11.so"));
+        filePaths.push_back(fs->absoluteFilePath(homeParentDirectory, "lib/python3.10/config-3.10-x86_64-linux-gnu/libpython3.10.so"));
+        filePaths.push_back(fs->absoluteFilePath(homeParentDirectory, "lib/python3.9/config-3.9-x86_64-linux-gnu/libpython3.9.so"));
+        filePaths.push_back(fs->absoluteFilePath(homeParentDirectory, "lib/python3.8/config-3.8-x86_64-linux-gnu/libpython3.8.so"));
+        filePaths.push_back(fs->absoluteFilePath(homeParentDirectory, "lib/libpython3.11.so"));
+        filePaths.push_back(fs->absoluteFilePath(homeParentDirectory, "lib/libpython3.10.so"));
+        filePaths.push_back(fs->absoluteFilePath(homeParentDirectory, "lib/libpython3.9.so"));
+        filePaths.push_back(fs->absoluteFilePath(homeParentDirectory, "lib/libpython3.8.so"));
+    }
+
+    virtual void buildStandardPaths(FileSystem *fs, const std::string &python_home, std::list<std::string> &filePaths) override
+    {
+        filePaths.push_back(fs->absoluteFilePath(python_home, "lib/libpython3.11.so"));
+        filePaths.push_back(fs->absoluteFilePath(python_home, "lib/libpython3.10.so"));
+        filePaths.push_back(fs->absoluteFilePath(python_home, "lib/libpython3.9.so"));
+        filePaths.push_back(fs->absoluteFilePath(python_home, "lib/libpython3.8.so"));
+    }
+
+    virtual void buildLibraryPaths(FileSystem *fs, const std::string &python_home, const std::string &python_home_new, std::list<std::string> &filePaths) override
+    {
+    }
+
+    virtual std::string findLandmarkLibrary(FileSystem *fs, const std::string &filePath) override
+    {
+        std::string directory = fs->directory(filePath);
+        std::string lastDirectory;
+        while (directory != lastDirectory && fs->directoryName(directory) != "lib")
+        {
+            lastDirectory = directory;
+            directory = fs->parentDirectory(directory);
+        }
+        return fs->parentDirectory(directory);
+    }
+
+    virtual std::string findProgramName(FileSystem *fs, const std::string &python_home) override
+    {
+        return fs->absoluteFilePath(python_home, "bin/python3");
+    }
+
+    virtual std::string joinedPathSeparator() override
+    {
+        return ":";
+    }
+};
+#endif
+
+#if OS_WINDOWS
+class WinSupport : public PlatformSupport
+{
+    void *dl;
+public:
+    WinSupport() : dl(nullptr) { }
+    ~WinSupport()
+    {
+        extern void deinitialize_pylib();
+        deinitialize_pylib();
+        if (dl != nullptr)
+            FreeLibrary((HMODULE)dl);
+        dl = nullptr;
+    }
+
+    virtual void loadLibrary(FileSystem *fs, const std::string &python_home, const std::string &filePath) override
+    {
+        // Python may have side-by-side DLLs that it uses. This seems to be an issue with how
+        // Anaconda handles installation of the VS redist -- they include it in the directory
+        // rather than installing it system wide. That approach works great when running the
+        // python.exe, but not so great when loading the python35.dll. To avoid _us_ having to
+        // install the VS redist, we add the python home to the DLL search path. Through trial
+        // and error, the qputenv or SetDllDirectory approach works. The AddDllDirectory does not
+        // work. I leave this code here so the next time someone encounters it, they can try these
+        // different solutions.
+
+        // DOES NOT WORK
+        //SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_USER_DIRS);
+        //AddDllDirectory((PCWSTR)QDir::toNativeSeparators(python_home).utf16());  // ensure that DLLs local to Python can be found
+
+        // DOES NOT WORK
+        //QProcessEnvironment::systemEnvironment().insert("PATH", QProcessEnvironment::systemEnvironment().value("PATH") + ";" + python_home);
+
+        // WORKS. Library/bin added for Anaconda/Miniconda 3.7 compatibility.
+        fs->putEnv("PATH", (fs->getEnv("PATH") + ";" + python_home + ";" + fs->absoluteFilePath(python_home, "Library/bin")));
+
+        // WORKS ALMOST. DOESN'T ALLOW CAMERA PLUG-INS TO LOAD.
+        //SetDllDirectory(QDir::toNativeSeparators(python_home).toUtf8());  // ensure that DLLs local to Python can be found
+
+        // required, see https://bugs.python.org/issue36085
+        std::string dll_directory = fs->toNativeSeparators(fs->absoluteFilePath(python_home, "Library/bin"));
+        std::wstring dll_directory_w = std::wstring(dll_directory.begin(), dll_directory.end());
+        AddDllDirectory(dll_directory_w.c_str());
+
+        dl = LoadLibraryA(fs->toNativeSeparators(filePath).c_str());
+
+        extern void initialize_pylib(void *);
+        initialize_pylib(dl);
+    }
+
+    virtual void *lookupSymbol(const std::string &symbolName) override
+    {
+        return GetProcAddress(HMODULE(dl), symbolName.c_str());
+    }
+
+    virtual bool isValid() const override
+    {
+        return dl != nullptr;
+    }
+
+    virtual void buildVirtualEnvironmentPaths(FileSystem *fs, const std::string &python_home, const std::string &home_bin_path, const std::string &version, std::list<std::string> &filePaths) override
+    {
+        filePaths.push_back(fs->absoluteFilePath(python_home, "Scripts/Python311.dll"));
+        filePaths.push_back(fs->absoluteFilePath(python_home, "Python311.dll"));
+        filePaths.push_back(fs->absoluteFilePath(home_bin_path, "Scripts/Python311.dll"));
+        filePaths.push_back(fs->absoluteFilePath(home_bin_path, "Python311.dll"));
+        filePaths.push_back(fs->absoluteFilePath(python_home, "Scripts/Python310.dll"));
+        filePaths.push_back(fs->absoluteFilePath(python_home, "Python310.dll"));
+        filePaths.push_back(fs->absoluteFilePath(home_bin_path, "Scripts/Python310.dll"));
+        filePaths.push_back(fs->absoluteFilePath(home_bin_path, "Python310.dll"));
+        filePaths.push_back(fs->absoluteFilePath(python_home, "Scripts/Python39.dll"));
+        filePaths.push_back(fs->absoluteFilePath(python_home, "Python39.dll"));
+        filePaths.push_back(fs->absoluteFilePath(home_bin_path, "Scripts/Python39.dll"));
+        filePaths.push_back(fs->absoluteFilePath(home_bin_path, "Python39.dll"));
+        filePaths.push_back(fs->absoluteFilePath(python_home, "Scripts/Python38.dll"));
+        filePaths.push_back(fs->absoluteFilePath(python_home, "Python38.dll"));
+        filePaths.push_back(fs->absoluteFilePath(home_bin_path, "Scripts/Python38.dll"));
+        filePaths.push_back(fs->absoluteFilePath(home_bin_path, "Python38.dll"));
+    }
+
+    virtual void buildStandardPaths(FileSystem *fs, const std::string &python_home, std::list<std::string> &filePaths) override
+    {
+        filePaths.push_back(fs->absoluteFilePath(python_home, "Python311.dll"));
+        filePaths.push_back(fs->absoluteFilePath(python_home, "Python310.dll"));
+        filePaths.push_back(fs->absoluteFilePath(python_home, "Python39.dll"));
+        filePaths.push_back(fs->absoluteFilePath(python_home, "Python38.dll"));
+    }
+
+    virtual void buildLibraryPaths(FileSystem *fs, const std::string &python_home, const std::string &python_home_new, std::list<std::string> &filePaths) override
+    {
+        filePaths.push_back(fs->absoluteFilePath(python_home, "Scripts/python311.zip"));
+        filePaths.push_back(fs->absoluteFilePath(python_home, "Scripts/python310.zip"));
+        filePaths.push_back(fs->absoluteFilePath(python_home, "Scripts/python39.zip"));
+        filePaths.push_back(fs->absoluteFilePath(python_home, "Scripts/python38.zip"));
+        filePaths.push_back(fs->absoluteFilePath(python_home_new, "DLLs"));
+        filePaths.push_back(fs->absoluteFilePath(python_home_new, "lib"));
+        filePaths.push_back(python_home_new);
+        filePaths.push_back(python_home);
+        filePaths.push_back(fs->absoluteFilePath(python_home, "lib/site-packages"));
+    }
+
+    virtual std::string findLandmarkLibrary(FileSystem *fs, const std::string &filePath) override
+    {
+        return fs->directory(filePath);
+    }
+
+    virtual std::string findProgramName(FileSystem *fs, const std::string &python_home) override
+    {
+        return fs->absoluteFilePath(python_home, "Python.exe");
+    }
+
+    virtual std::string joinedPathSeparator() override
+    {
+        return ";";
+    }
+};
+#endif
+
+PythonSupport::PythonSupport(FileSystem *fs_, const std::string &python_home, const std::string &python_library)
+    : module_exception(NULL)
+    , fs(fs_)
+{
+#if OS_MACOS
+    ps = std::unique_ptr<PlatformSupport>(new MacSupport());
+#elif OS_LINUX
+    ps = std::unique_ptr<PlatformSupport>(new LinuxSupport());
+#else
+    ps = std::unique_ptr<PlatformSupport>(new WinSupport());
+#endif
+    std::list<std::string> filePaths;
+    std::string venv_conf_file_name = fs->absoluteFilePath(python_home, "pyvenv.cfg");
+    if (!python_library.empty())
+    {
+        filePaths.push_back(python_library);
+    }
+    else if (fs->exists(venv_conf_file_name))
+    {
+        std::string home_bin_path;
+        std::string version;
+        if (fs->parseConfigFile(venv_conf_file_name, home_bin_path, version))
+            ps->buildVirtualEnvironmentPaths(fs.get(), python_home, home_bin_path, version, filePaths);
     }
     else
     {
         // probably conda or standard Python
-        file_paths.append(QDir(python_home).absoluteFilePath("lib/libpython3.11.dylib"));
-        file_paths.append(QDir(python_home).absoluteFilePath("lib/libpython3.10.dylib"));
-        file_paths.append(QDir(python_home).absoluteFilePath("lib/libpython3.9.dylib"));
-        file_paths.append(QDir(python_home).absoluteFilePath("lib/libpython3.8.dylib"));
+        ps->buildStandardPaths(fs.get(), python_home, filePaths);
     }
 
-    Q_FOREACH(file_path, file_paths)
+    std::string filePath;
+    for (auto filePath_ : filePaths)
     {
-        if (QFile(file_path).exists())
-            break;
-    }
-
-    QDir d = QFileInfo(file_path).absoluteDir();
-    d.cdUp();
-    m_actual_python_home = d.absolutePath();
-
-    void *dl = dlopen(file_path.toUtf8().constData(), RTLD_LAZY);
-#elif defined(Q_OS_LINUX)
-    QStringList file_paths;
-    QString file_path;
-    QString venv_conf_file_name = QDir(python_home).absoluteFilePath("pyvenv.cfg");
-    if (!python_library.isEmpty())
-    {
-        file_paths.append(python_library);
-    }
-    else if (QFile(venv_conf_file_name).exists())
-    {
-        // probably Python w/ virtual environment
-        QSettings settings(venv_conf_file_name, QSettings::IniFormat);
-        QString home_bin_path = settings.value("home").toString();
-        if (!home_bin_path.isEmpty())
+        if (fs->exists(filePath_))
         {
-            QDir home_dir(home_bin_path);
-            home_dir.cdUp();
-            file_paths.append(home_dir.absoluteFilePath("lib/python3.11/config-3.11-x86_64-linux-gnu/libpython3.11.so"));
-            file_paths.append(home_dir.absoluteFilePath("lib/python3.10/config-3.10-x86_64-linux-gnu/libpython3.10.so"));
-            file_paths.append(home_dir.absoluteFilePath("lib/python3.9/config-3.9-x86_64-linux-gnu/libpython3.9.so"));
-            file_paths.append(home_dir.absoluteFilePath("lib/python3.8/config-3.8-x86_64-linux-gnu/libpython3.8.so"));
-            file_paths.append(home_dir.absoluteFilePath("lib/libpython3.11.so"));
-            file_paths.append(home_dir.absoluteFilePath("lib/libpython3.10.so"));
-            file_paths.append(home_dir.absoluteFilePath("lib/libpython3.9.so"));
-            file_paths.append(home_dir.absoluteFilePath("lib/libpython3.8.so"));
+            filePath = filePath_;
+            break;
         }
     }
-    else
-    {
-        // probably conda or standard Python
-        file_paths.append(QDir(python_home).absoluteFilePath("lib/libpython3.11.so"));
-        file_paths.append(QDir(python_home).absoluteFilePath("lib/libpython3.10.so"));
-        file_paths.append(QDir(python_home).absoluteFilePath("lib/libpython3.9.so"));
-        file_paths.append(QDir(python_home).absoluteFilePath("lib/libpython3.8.so"));
-    }
 
-    Q_FOREACH(file_path, file_paths)
-    {
-        if (QFile(file_path).exists())
-            break;
-    }
+    m_actual_python_home = ps->findLandmarkLibrary(fs.get(), filePath);
 
-    // see Python get_path.c for info about landmarks. this is a hack.
-    QDir d = QFileInfo(file_path).absoluteDir();
-    while (d.dirName() != "lib")
-    {
-        if (!d.cdUp())
-            break;
-    }
-    d.cdUp();
+    ps->loadLibrary(fs.get(), python_home, filePath);
 
-    m_actual_python_home = d.absolutePath();
+    m_valid = ps->isValid();
 
-    void *dl = dlopen(file_path.toUtf8().constData(), RTLD_LAZY | RTLD_GLOBAL);
-#else
-    QStringList file_paths;
-    QString python_home_new = python_home;
-    QString file_path;
-    QString venv_conf_file_name = QDir(python_home).absoluteFilePath("pyvenv.cfg");
-    if (!python_library.isEmpty())
-    {
-        file_paths.append(python_library);
-    }
-    else if (QFile(venv_conf_file_name).exists())
-    {
-        // probably Python w/ virtual environment.
-        // this code makes me hate both Windows and Qt equally. it is necessary to handle backslashes in paths.
-        QFile file(venv_conf_file_name);
-        if (file.open(QFile::ReadOnly))
-        {
-            QByteArray bytes = file.readAll();
-            QString str = QString::fromUtf8(bytes);
-            Q_FOREACH(const QString &line, str.split(QRegularExpression("[\r\n]"), Qt::SkipEmptyParts))
-            {
-                QRegularExpression re("^home\\s?=\\s?(.+)$");
-                QRegularExpressionMatch match = re.match(line);
-                if (match.hasMatch())
-                {
-                    QString home_bin_path = match.captured(1).trimmed();
-                    if (!home_bin_path.isEmpty())
-                    {
-                        QDir home_dir(QDir::fromNativeSeparators(home_bin_path));
-                        python_home_new = home_dir.absolutePath();
-                        file_paths.append(QDir(python_home).absoluteFilePath("Scripts/Python311.dll"));
-                        file_paths.append(QDir(python_home).absoluteFilePath("Python311.dll"));
-                        file_paths.append(QDir(python_home_new).absoluteFilePath("Scripts/Python311.dll"));
-                        file_paths.append(QDir(python_home_new).absoluteFilePath("Python311.dll"));
-                        file_paths.append(QDir(python_home).absoluteFilePath("Scripts/Python310.dll"));
-                        file_paths.append(QDir(python_home).absoluteFilePath("Python310.dll"));
-                        file_paths.append(QDir(python_home_new).absoluteFilePath("Scripts/Python310.dll"));
-                        file_paths.append(QDir(python_home_new).absoluteFilePath("Python310.dll"));
-                        file_paths.append(QDir(python_home).absoluteFilePath("Scripts/Python39.dll"));
-                        file_paths.append(QDir(python_home).absoluteFilePath("Python39.dll"));
-                        file_paths.append(QDir(python_home_new).absoluteFilePath("Scripts/Python39.dll"));
-                        file_paths.append(QDir(python_home_new).absoluteFilePath("Python39.dll"));
-                        file_paths.append(QDir(python_home).absoluteFilePath("Scripts/Python38.dll"));
-                        file_paths.append(QDir(python_home).absoluteFilePath("Python38.dll"));
-                        file_paths.append(QDir(python_home_new).absoluteFilePath("Scripts/Python38.dll"));
-                        file_paths.append(QDir(python_home_new).absoluteFilePath("Python38.dll"));
-                    }
-                }
-            }
-        }
-    }
-    else
-    {
-        file_paths.append(QDir(python_home).absoluteFilePath("Python311.dll"));
-        file_paths.append(QDir(python_home).absoluteFilePath("Python310.dll"));
-        file_paths.append(QDir(python_home).absoluteFilePath("Python39.dll"));
-        file_paths.append(QDir(python_home).absoluteFilePath("Python38.dll"));
-    }
-
-    Q_FOREACH(file_path, file_paths)
-    {
-        if (QFile(file_path).exists())
-            break;
-    }
-
-    QDir d = QFileInfo(file_path).absoluteDir();
-    m_actual_python_home = d.absolutePath();
-
-    // Python may have side-by-side DLLs that it uses. This seems to be an issue with how
-    // Anaconda handles installation of the VS redist -- they include it in the directory
-    // rather than installing it system wide. That approach works great when running the
-    // python.exe, but not so great when loading the python35.dll. To avoid _us_ having to
-    // install the VS redist, we add the python home to the DLL search path. Through trial
-    // and error, the qputenv or SetDllDirectory approach works. The AddDllDirectory does not
-    // work. I leave this code here so the next time someone encounters it, they can try these
-    // different solutions.
-
-    // DOES NOT WORK
-    //SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_USER_DIRS);
-    //AddDllDirectory((PCWSTR)QDir::toNativeSeparators(python_home).utf16());  // ensure that DLLs local to Python can be found
-
-    // DOES NOT WORK
-    //QProcessEnvironment::systemEnvironment().insert("PATH", QProcessEnvironment::systemEnvironment().value("PATH") + ";" + python_home);
-
-    // WORKS. Library/bin added for Anaconda/Miniconda 3.7 compatibility.
-    qputenv("PATH", (qgetenv("PATH") + ";" + python_home + ";" + QDir(python_home).absoluteFilePath("Library/bin")).toUtf8());
-
-    // WORKS ALMOST. DOESN'T ALLOW CAMERA PLUG-INS TO LOAD.
-    //SetDllDirectory(QDir::toNativeSeparators(python_home).toUtf8());  // ensure that DLLs local to Python can be found
-
-    // required, see https://bugs.python.org/issue36085
-    AddDllDirectory((PCWSTR)(QDir::toNativeSeparators(QDir(python_home).absoluteFilePath("Library/bin")).utf16()));
-
-    void *dl = LoadLibraryA(QDir::toNativeSeparators(file_path).toUtf8());
-#endif
-    extern void initialize_pylib(void *);
-    initialize_pylib(dl);
-    m_valid = dl != NULL;
-#endif
-
-#if defined(DYNAMIC_PYTHON) && DYNAMIC_PYTHON
-#if !defined(Q_OS_WIN)
-    dynamic_PyArg_ParseTuple = (PyArg_ParseTupleFn)dlsym(dl, "PyArg_ParseTuple");
-    dynamic_Py_BuildValue = (Py_BuildValueFn)dlsym(dl, "Py_BuildValue");
-#else
-    dynamic_PyArg_ParseTuple = (PyArg_ParseTupleFn)GetProcAddress(HMODULE(dl), "PyArg_ParseTuple");
-    dynamic_Py_BuildValue = (Py_BuildValueFn)GetProcAddress(HMODULE(dl), "Py_BuildValue");
-#endif
-#else
-    dynamic_PyArg_ParseTuple = PyArg_ParseTuple;
-    dynamic_Py_BuildValue = Py_BuildValue;
-#endif
+    dynamic_PyArg_ParseTuple = (PyArg_ParseTupleFn)ps->lookupSymbol("PyArg_ParseTuple");
+    dynamic_Py_BuildValue = (Py_BuildValueFn)ps->lookupSymbol("Py_BuildValue");
 }
 
 PythonSupport::PythonSupport(PythonSupport const &)
@@ -380,76 +486,6 @@ PythonSupport& PythonSupport::operator=(PythonSupport const &)
 PythonSupport::~PythonSupport()
 {
     Py_XDECREF(module_exception);
-
-#if defined(DYNAMIC_PYTHON) && DYNAMIC_PYTHON
-    extern void *pylib;
-    void *dl = pylib;
-#endif
-
-    extern void deinitialize_pylib();
-    deinitialize_pylib();
-
-#if defined(DYNAMIC_PYTHON) && DYNAMIC_PYTHON
-#if defined(Q_OS_MAC)
-    dlclose(dl);
-#elif defined(Q_OS_LINUX)
-    dlclose(dl);
-#else
-    FreeLibrary((HMODULE)dl);
-#endif
-#endif
-}
-
-class PyObjectPtr
-{
-public:
-    PyObjectPtr() : py_object(NULL) { }
-    PyObjectPtr(const PyObjectPtr &py_object_ptr)
-    {
-        Python_ThreadBlock thread_block;
-        py_object = py_object_ptr.pyObject();
-        Py_INCREF(py_object);
-    }
-    ~PyObjectPtr()
-    {
-        Python_ThreadBlock thread_block;
-        if (this->py_object)
-        {
-            Py_DECREF(this->py_object);
-        }
-    }
-    PyObjectPtr &operator=(const PyObjectPtr &) = delete;
-    PyObject *pyObject() const { return this->py_object; }
-    void setPyObject(PyObject *py_object)
-    {
-        Python_ThreadBlock thread_block;
-        if (this->py_object)
-        {
-            Py_DECREF(this->py_object);
-        }
-        Py_INCREF(py_object);
-        this->py_object = py_object;
-    }
-
-    static int metaId();
-
-private:
-    PyObject *py_object;
-};
-
-Q_DECLARE_METATYPE(PyObjectPtr)
-
-// static
-int PyObjectPtr::metaId()
-{
-    static bool once = false;
-    static int meta_id = 0;
-    if (!once)
-    {
-        meta_id = qRegisterMetaType<PyObjectPtr>("PyObjectPtr");
-        once = true;
-    }
-    return meta_id;
 }
 
 struct Python_ThreadBlockState
@@ -494,136 +530,56 @@ void Python_ThreadAllow::grab()
     m_state->gstate = CALL_PY(PyEval_SaveThread)();
 }
 
-static wchar_t python_home_static[512];
-static wchar_t python_program_name_static[512];
-
-void PythonSupport::initialize(const QString &python_home, const QList<QString> &python_paths, const QString &python_library)
+std::string join(std::list<std::string>::const_iterator begin, std::list<std::string>::const_iterator end, const std::string &separator)
 {
-#if !(defined(DYNAMIC_PYTHON) && DYNAMIC_PYTHON)
-#if defined(Q_OS_MAC) && !defined(DEBUG)
-    if (!python_home.isEmpty())
-        setenv("PYTHONHOME", python_home.toUtf8().constData(), 1);
-#endif
-#else
-    if (!python_home.isEmpty())
+    std::string joined;
+    bool first = true;
+    for (auto iter = begin; iter != end; ++iter, first = false)
     {
-        memset(&python_home_static[0], 0, sizeof(python_home_static));
-        python_home.toWCharArray(python_home_static);
-        CALL_PY(Py_SetPythonHome)(python_home_static);  // requires a permanent buffer
+        if (!first)
+            joined += separator + *iter;
+        else
+            joined = *iter;
     }
-#endif
+    return joined;
+}
 
-#if defined(Q_OS_MAC)
-    QString python_home_new = python_home;
-    QString python_program_name = QDir(python_home).absoluteFilePath("bin/python3");
+static std::wstring python_home_static;
+static std::wstring python_program_name_static;
+
+void PythonSupport::initialize(const std::string &python_home, const std::list<std::string> &python_paths, const std::string &python_library)
+{
+    auto python_paths_ = python_paths;
+
+    std::string python_home_new = python_home;
+    std::string python_program_name = ps->findProgramName(fs.get(), python_home);
 
     // check if we're running inside a venv, determined by whether pyvenv.cfg exists.
     // if so, read the config file and find the home key, indicating the python installation
-    // directory (with /bin attached). then call SetPythonHome and SetProgramName with the
+    // directory (with /bin attached). then call SetPythonHoCme and SetProgramName with the
     // installation directory and virtual environment python path respectively. these are
     // required for the virtual environment to load correctly.
-    QString venv_conf_file_name = QDir(python_home).absoluteFilePath("pyvenv.cfg");
-    if (QFile(venv_conf_file_name).exists())
+    std::string venv_conf_file_name = fs->absoluteFilePath(python_home, "pyvenv.cfg");
+    if (fs->exists(venv_conf_file_name))
     {
         python_home_new = m_actual_python_home;
+
+        // may be required to configure the path; see https://bugs.python.org/issue34725
+        ps->buildLibraryPaths(fs.get(), python_home, python_home_new, python_paths_);
     }
 
-    if (!python_paths.isEmpty())
-        CALL_PY(Py_SetPath)(const_cast<wchar_t *>(python_paths.join(":").toStdWString().c_str()));
-
-    memset(&python_home_static[0], 0, sizeof(python_home_static));
-    python_home_new.toWCharArray(python_home_static);
-    CALL_PY(Py_SetPythonHome)(python_home_static);  // requires a permanent buffer
-
-    memset(&python_program_name_static[0], 0, sizeof(python_program_name_static));
-    python_program_name.toWCharArray(python_program_name_static);
-    CALL_PY(Py_SetProgramName)(python_program_name_static);  // requires a permanent buffer
-#elif defined(Q_OS_WIN)
-    QString python_home_new = python_home;
-    QString python_program_name = QDir(python_home).absoluteFilePath("Python.exe");
-
-    // check if we're running inside a venv, determined by whether pyvenv.cfg exists.
-    // if so, read the config file and find the home key, indicating the python installation
-    // directory (with /bin attached). then call SetPythonHome and SetProgramName with the
-    // installation directory and virtual environment python path respectively. these are
-    // required for the virtual environment to load correctly.
-    QString venv_conf_file_name = QDir(python_home).absoluteFilePath("pyvenv.cfg");
-    if (QFile(venv_conf_file_name).exists())
+    if (!python_paths_.empty())
     {
-        // probably Python w/ virtual environment.
-        // this code makes me hate both Windows and Qt equally. it is necessary to handle backslashes in paths.
-        QFile file(venv_conf_file_name);
-        if (file.open(QFile::ReadOnly))
-        {
-            QByteArray bytes = file.readAll();
-            QString str = QString::fromUtf8(bytes);
-            Q_FOREACH(const QString &line, str.split(QRegularExpression("[\r\n]"), Qt::SkipEmptyParts))
-            {
-                QRegularExpression re("^home\\s?=\\s?(.+)$");
-                QRegularExpressionMatch match = re.match(line);
-                if (match.hasMatch())
-                {
-                    QString home_bin_path = match.captured(1).trimmed();
-                    if (!home_bin_path.isEmpty())
-                    {
-                        python_home_new = m_actual_python_home;
-
-                        python_program_name = QDir(python_home).absoluteFilePath("Python.exe");
-
-                        // required to configure the path; see https://bugs.python.org/issue34725
-                        QStringList python_paths;
-                        python_paths.append(QDir(python_home).absoluteFilePath("Scripts/python311.zip"));
-                        python_paths.append(QDir(python_home).absoluteFilePath("Scripts/python310.zip"));
-                        python_paths.append(QDir(python_home).absoluteFilePath("Scripts/python39.zip"));
-                        python_paths.append(QDir(python_home).absoluteFilePath("Scripts/python38.zip"));
-                        python_paths.append(QDir(python_home_new).absoluteFilePath("DLLs"));
-                        python_paths.append(QDir(python_home_new).absoluteFilePath("lib"));
-                        python_paths.append(QDir(python_home_new).absolutePath());
-                        python_paths.append(QDir(python_home).absolutePath());
-                        python_paths.append(QDir(python_home).absoluteFilePath("lib/site-packages"));
-                        CALL_PY(Py_SetPath)(const_cast<wchar_t *>(python_paths.join(";").toStdWString().c_str()));
-                    }
-                }
-            }
-        }
+        std::string path = join(python_paths_.begin(), python_paths_.end(), ps->joinedPathSeparator());
+        std::wstring path_w(path.begin(), path.end());
+        CALL_PY(Py_SetPath)(path_w.data());
     }
 
-    if (!python_paths.isEmpty())
-        CALL_PY(Py_SetPath)(const_cast<wchar_t *>(python_paths.join(";").toStdWString().c_str()));
+    python_home_static = std::wstring(python_home_new.begin(), python_home_new.end());
+    CALL_PY(Py_SetPythonHome)(python_home_static.data());  // requires a permanent buffer
 
-    memset(&python_home_static[0], 0, sizeof(python_home_static));
-    python_home_new.toWCharArray(python_home_static);
-    CALL_PY(Py_SetPythonHome)(python_home_static);  // requires a permanent buffer
-
-    memset(&python_program_name_static[0], 0, sizeof(python_program_name_static));
-    python_program_name.toWCharArray(python_program_name_static);
-    CALL_PY(Py_SetProgramName)(python_program_name_static);  // requires a permanent buffer
-#elif defined(Q_OS_LINUX)
-    QString python_home_new = python_home;
-    QString python_program_name = QDir(python_home).absoluteFilePath("bin/python3");
-
-    // check if we're running inside a venv, determined by whether pyvenv.cfg exists.
-    // if so, read the config file and find the home key, indicating the python installation
-    // directory (with /bin attached). then call SetPythonHome and SetProgramName with the
-    // installation directory and virtual environment python path respectively. these are
-    // required for the virtual environment to load correctly.
-    QString venv_conf_file_name = QDir(python_home).absoluteFilePath("pyvenv.cfg");
-    if (QFile(venv_conf_file_name).exists())
-    {
-        python_home_new = m_actual_python_home;
-    }
-
-    if (!python_paths.isEmpty())
-        CALL_PY(Py_SetPath)(const_cast<wchar_t *>(python_paths.join(":").toStdWString().c_str()));
-
-    memset(&python_home_static[0], 0, sizeof(python_home_static));
-    python_home_new.toWCharArray(python_home_static);
-    CALL_PY(Py_SetPythonHome)(python_home_static);  // requires a permanent buffer
-
-    memset(&python_program_name_static[0], 0, sizeof(python_program_name_static));
-    python_program_name.toWCharArray(python_program_name_static);
-    CALL_PY(Py_SetProgramName)(python_program_name_static);  // requires a permanent buffer
-#endif
+    python_program_name_static = std::wstring(python_program_name.begin(), python_program_name.end());
+    CALL_PY(Py_SetProgramName)(python_program_name_static.data());  // requires a permanent buffer
 
     CALL_PY(Py_Initialize)();
 
@@ -631,8 +587,6 @@ void PythonSupport::initialize(const QString &python_home, const QList<QString> 
     // will need to acquire the GIL. the initial state is saved because the GIL is required to
     // finalize.
     m_initial_state = CALL_PY(PyEval_SaveThread)();
-
-    PyObjectPtr::metaId();
 
     Python_ThreadBlock thread_block;
 
@@ -648,214 +602,118 @@ void PythonSupport::deinitialize()
     CALL_PY(Py_Finalize)();
 }
 
-QObject *PythonSupport::UnwrapQObject(PyObject *py_obj)
+void *UnwrapObject2(PyObject *py_obj)
 {
-#if SIMPLE_WRAP
-    return static_cast<QObject *>((void *)PyInt_AsLong(py_obj));
-#else
-    QObject *ptr = NULL;
+    void *ptr = NULL;
     if (CALL_PY(PyCapsule_CheckExact)(py_obj))
-        ptr = static_cast<QObject *>(CALL_PY(PyCapsule_GetPointer)(py_obj, PythonSupport::qobject_capsule_name));
+        ptr = static_cast<void *>(CALL_PY(PyCapsule_GetPointer)(py_obj, PythonSupport::qobject_capsule_name));
     return ptr;
-#endif
 }
 
-PyObject *WrapQObject(QObject *ptr)
+void *PythonSupport::UnwrapObject(PyObject *py_obj)
 {
-#if SIMPLE_WRAP
-    return PyInt_FromLong((long)ptr);
-#else
-    PyObject *ret = CALL_PY(PyCapsule_New)(ptr, PythonSupport::qobject_capsule_name, NULL);
-    return ret;
-#endif
+    return UnwrapObject2(py_obj);
 }
 
-// New reference
-PyObject* QStringToPyObject(const QString& str)
+PyObject *PythonValueVariantToPyObject(const PythonValueVariant &value_variant)
 {
-    if (str.isNull()) {
-        return PyString_FromString("");
-    } else {
-        return CALL_PY(PyUnicode_DecodeUTF16)((const char*)str.utf16(), str.length()*2, NULL, NULL);
-    }
-}
-
-void FreePyObject(PyObject *py_object)
-{
-    Py_XDECREF(py_object);
-}
-
-PyObject *QVariantToPyObject(const QVariant &value);
-
-// New reference
-PyObject *QVariantMapToPyObject(const QVariantMap &variant_map)
-{
-    PyObject *py_map = CALL_PY(PyDict_New)();
-    Q_FOREACH(const QString &key, variant_map.keys())
+    if (value_variant.value.valueless_by_exception())
     {
-        PyObject *py_key = QStringToPyObject(key);
-        PyObject *py_value = QVariantToPyObject(variant_map.value(key));
-        CALL_PY(PyDict_SetItem)(py_map, py_key, py_value);
-        Py_DECREF(py_key);
-        Py_DECREF(py_value);
+        Py_INCREF(CALL_PY(Py_NoneGet)());
+        return CALL_PY(Py_NoneGet)();
     }
-    return py_map;
-}
-
-// New reference
-PyObject *QVariantListToPyObject(const QVariantList &variant_list)
-{
-    PyObject *py_list = CALL_PY(PyTuple_New)(variant_list.size());
-    int i = 0;
-    Q_FOREACH(const QVariant &variant, variant_list)
+    else if (std::holds_alternative<bool>(value_variant.value))
     {
-        CALL_PY(PyTuple_SetItem)(py_list, i, QVariantToPyObject(variant)); // steals reference
-        i++;
+        PyObject *py_obj = *std::get_if<bool>(&value_variant.value) ? CALL_PY(Py_TrueGet)() : CALL_PY(Py_FalseGet)();
+        Py_INCREF(py_obj);
+        return py_obj;
     }
-    return py_list;
-}
-
-// New reference
-PyObject *QVariantToPyObject(const QVariant &value)
-{
-    const void *data = (void *)value.constData();
-    int type = value.userType();
-
-    switch (type)
+    else if (std::holds_alternative<long>(value_variant.value))
     {
-        case QMetaType::Void:
-            Py_INCREF(CALL_PY(Py_NoneGet)());
-            return CALL_PY(Py_NoneGet)();
-
-        case QMetaType::Char:
-            return PyInt_FromLong(*((char*)data));
-
-        case QMetaType::UChar:
-            return PyInt_FromLong(*((unsigned char*)data));
-
-        case QMetaType::Short:
-            return PyInt_FromLong(*((short*)data));
-
-        case QMetaType::UShort:
-            return PyInt_FromLong(*((unsigned short*)data));
-
-        case QMetaType::Long:
-            return PyInt_FromLong(*((long*)data));
-
-        case QMetaType::ULong:
-            // does not fit into simple int of python
-            return CALL_PY(PyLong_FromUnsignedLong)(*((unsigned long*)data));
-
-        case QMetaType::Bool: {
-            PyObject *py_obj = value.toBool() ? CALL_PY(Py_TrueGet)() : CALL_PY(Py_FalseGet)();
-            Py_INCREF(py_obj);
-            return py_obj;
-        }
-
-        case QMetaType::Int:
-            return PyInt_FromLong(*((int*)data));
-
-        case QMetaType::UInt:
-            // does not fit into simple int of python
-            return CALL_PY(PyLong_FromUnsignedLong)(*((unsigned int*)data));
-
-        case QMetaType::QChar:
-            return PyInt_FromLong(*((short*)data));
-
-        case QMetaType::Float:
-            return CALL_PY(PyFloat_FromDouble)(*((float*)data));
-
-        case QMetaType::Double:
-            return CALL_PY(PyFloat_FromDouble)(*((double*)data));
-
-        case QMetaType::LongLong:
-            return CALL_PY(PyLong_FromLongLong)(*((qint64*)data));
-
-        case QMetaType::ULongLong:
-            return CALL_PY(PyLong_FromUnsignedLongLong)(*((quint64*)data));
-
-        case QMetaType::QVariantMap:
-            return QVariantMapToPyObject(*((QVariantMap*)data));
-
-        case QMetaType::QVariantList:
-            return QVariantListToPyObject(*((QVariantList*)data));
-
-        case QMetaType::QString:
-            return QStringToPyObject(*((QString*)data));
-
-        case QMetaType::QStringList:
+        return CALL_PY(PyLong_FromLong)(*std::get_if<long>(&value_variant.value));
+    }
+    else if (std::holds_alternative<long long>(value_variant.value))
+    {
+        return CALL_PY(PyLong_FromLongLong)(*std::get_if<long long>(&value_variant.value));
+    }
+    else if (std::holds_alternative<double>(value_variant.value))
+    {
+        return CALL_PY(PyFloat_FromDouble)(*std::get_if<double>(&value_variant.value));
+    }
+    else if (std::holds_alternative<void *>(value_variant.value))
+    {
+        return CALL_PY(PyCapsule_New)(*std::get_if<void *>(&value_variant.value), PythonSupport::qobject_capsule_name, NULL);
+    }
+    else if (std::holds_alternative<std::string>(value_variant.value))
+    {
+        return CALL_PY(PyUnicode_FromString)(std::get_if<std::string>(&value_variant.value)->c_str());
+    }
+    else if (std::holds_alternative<std::map<std::string, PythonValueVariant>>(value_variant.value))
+    {
+        PyObject *py_map = CALL_PY(PyDict_New)();
+        for (auto item: *std::get_if<std::map<std::string, PythonValueVariant>>(&value_variant.value))
         {
-            QVariantList variant_list;
-            Q_FOREACH(const QString &str, *((QStringList*)data))
-                variant_list.append(str);
-            return QVariantListToPyObject(variant_list);
+            PyObject *py_key = CALL_PY(PyUnicode_FromString)(item.first.c_str());
+            PyObject *py_value = PythonValueVariantToPyObject(item.second);
+            CALL_PY(PyDict_SetItem)(py_map, py_key, py_value);
+            Py_DECREF(py_key);
+            Py_DECREF(py_value);
         }
-
-        case QMetaType::QObjectStar:
+        return py_map;
+    }
+    else if (std::holds_alternative<std::vector<PythonValueVariant>>(value_variant.value))
+    {
+        auto variant_list = std::get_if<std::vector<PythonValueVariant>>(&value_variant.value);
+        PyObject *py_list = CALL_PY(PyTuple_New)(variant_list->size());
+        int i = 0;
+        for (auto item: *variant_list)
         {
-            return WrapQObject(*((QObject**)data));
+            CALL_PY(PyTuple_SetItem)(py_list, i, PythonValueVariantToPyObject(item)); // steals reference
+            i++;
         }
-
-        default:
-        {
-            if (type == PyObjectPtr::metaId())
-            {
-                PyObject *py_object = ((PyObjectPtr *)data)->pyObject();
-                Py_INCREF(py_object);
-                return py_object;
-            }
-            else if (type == qMetaTypeId< QList<QUrl> >())
-            {
-                QVariantList variant_list;
-                Q_FOREACH(const QUrl &url, *((QList<QUrl> *)data))
-                    variant_list.append(url.toString());
-                return QVariantListToPyObject(variant_list);
-            }
-        }
+        return py_list;
+    }
+    else if (std::holds_alternative<PyObjectPtr>(value_variant.value))
+    {
+        const PyObjectPtr *ptr = std::get_if<PyObjectPtr>(&value_variant.value);
+        PyObject *py_object = ptr->get();
+        Py_INCREF(py_object);
+        return py_object;
     }
 
     Py_INCREF(CALL_PY(Py_NoneGet)());
     return CALL_PY(Py_NoneGet)();
 }
 
-QString PyObjectToQString(PyObject* val)
-{
-    if (PyUnicode_Check(val))
-    {
-        return QString::fromUtf8(CALL_PY(PyUnicode_AsUTF8)(val));
-    }
-    return QString();
-}
-
-QVariant PyObjectToQVariant(PyObject *py_object)
+PythonValueVariant PyObjectToValueVariant(PyObject *py_object)
 {
     if (PyString_Check(py_object) || PyUnicode_Check(py_object))
     {
-        return PyObjectToQString(py_object);
+        return PythonValueVariant{std::string(CALL_PY(PyUnicode_AsUTF8)(py_object))};
     }
     else if (PyInt_Check(py_object))
     {
-        return (int)PyInt_AsLong(py_object);
+        return PythonValueVariant{PyInt_AsLong(py_object)};
     }
     else if (PyLong_Check(py_object))
     {
-        return CALL_PY(PyLong_AsLongLong)(py_object);
+        return PythonValueVariant{CALL_PY(PyLong_AsLongLong)(py_object)};
     }
     else if (CALL_PY(PyFloat_Check)(py_object))
     {
-        return CALL_PY(PyFloat_AsDouble)(py_object);
+        return PythonValueVariant{CALL_PY(PyFloat_AsDouble)(py_object)};
     }
     else if (CALL_PY(PyBool_Check)(py_object))
     {
-        return CALL_PY(PyObject_IsTrue)(py_object);
+        return PythonValueVariant{static_cast<bool>(CALL_PY(PyObject_IsTrue)(py_object))};
     }
-    else if (CALL_PY(PyCapsule_IsValid)(py_object, PythonSupport::qobject_capsule_name))
+    else if (CALL_PY(PyCapsule_IsValid)(py_object, PythonSupport::qobject_capsule_name) && CALL_PY(PyCapsule_CheckExact)(py_object))
     {
-        return QVariant::fromValue(PythonSupport::instance()->UnwrapQObject(py_object));
+        return PythonValueVariant{CALL_PY(PyCapsule_GetPointer)(py_object, PythonSupport::qobject_capsule_name)};
     }
     else if (PyDict_Check(py_object))
     {
-        QMap<QString,QVariant> map;
+        std::map<std::string, PythonValueVariant> map;
         PyObject *items = CALL_PY(PyMapping_Items)(py_object);
         if (items)
         {
@@ -865,102 +723,71 @@ QVariant PyObjectToQVariant(PyObject *py_object)
                 PyObject *tuple = CALL_PY(PyList_GetItem)(items,i); //borrowed
                 PyObject *key = CALL_PY(PyTuple_GetItem)(tuple, 0); //borrowed
                 PyObject *value = CALL_PY(PyTuple_GetItem)(tuple, 1); //borrowed
-                map.insert(PyObjectToQString(key), PyObjectToQVariant(value));
+                std::string key_string = std::string(CALL_PY(PyUnicode_AsUTF8)(key));
+                PythonValueVariant value_variant = PyObjectToValueVariant(value);
+                map.insert(std::pair(key_string, value_variant));
             }
             Py_DECREF(items);
-            return map;
         }
+        return PythonValueVariant{map};
     }
-    else if (PyList_Check(py_object) || PyTuple_Check(py_object))
+    else if ((PyList_Check(py_object) || PyTuple_Check(py_object)) && CALL_PY(PySequence_Check)(py_object))
     {
-        if (CALL_PY(PySequence_Check)(py_object))
+        std::vector<PythonValueVariant> list;
+        int count = (int)CALL_PY(PySequence_Size)(py_object);
+        PyObject *fast_list = CALL_PY(PySequence_Fast)(py_object, "error");
+        PyObject **fast_items = PySequence_Fast_ITEMS(fast_list);
+        for (int i=0; i<count; i++)
         {
-            QVariantList list;
-            int count = (int)CALL_PY(PySequence_Size)(py_object);
-            PyObject *fast_list = CALL_PY(PySequence_Fast)(py_object, "error");
-            PyObject **fast_items = PySequence_Fast_ITEMS(fast_list);
-            for (int i=0; i<count; i++)
-            {
-                list.append(PyObjectToQVariant(fast_items[i]));
-            }
-            Py_DECREF(fast_list);
-            return list;
+            list.push_back(PyObjectToValueVariant(fast_items[i]));
         }
+        Py_DECREF(fast_list);
+        return PythonValueVariant{list};
     }
     else if (py_object == CALL_PY(Py_NoneGet)())
     {
-        return QVariant();
+        return PythonValueVariant();
     }
     else
     {
         PyObjectPtr py_object_ptr;
         py_object_ptr.setPyObject(py_object);
-        return QVariant::fromValue(py_object_ptr);
+        return PythonValueVariant{py_object_ptr};
     }
-    return QVariant();
 }
 
-void PythonSupport::addResourcePath(const QString &resources_path)
+void PythonSupport::addResourcePath(const std::string &resources_path)
 {
     PyObject *sys_module = CALL_PY(PyImport_ImportModule)("sys");
     PyObject *py_path = CALL_PY(PyObject_GetAttrString)(sys_module, "path");
-    PyObject *py_filename = QStringToPyObject(resources_path);
+    PyObject *py_filename = CALL_PY(PyUnicode_FromString)(resources_path.c_str());
     CALL_PY(PyList_Insert)(py_path, 1, py_filename);
     Py_DECREF(py_filename);
     Py_DECREF(py_path);
     Py_DECREF(sys_module);
 }
 
-void PythonSupport::addPyObjectToModuleFromQVariant(PyObject* module, const QString &identifier, const QVariant& object)
+PythonValueVariant PythonSupport::invokePyMethod(PyObjectPtr *object, const std::string &method, const std::list<PythonValueVariant> &args)
 {
-    CALL_PY(PyModule_AddObject)(module, identifier.toLatin1().data(), QVariantToPyObject(object));   // steals reference
-}
-
-void PythonSupport::addPyObjectToModule(PyObject* module, const QString &identifier, PyObject *object)
-{
-    CALL_PY(PyModule_AddObject)(module, identifier.toLatin1().data(), object);   // steals reference
-}
-
-bool PythonSupport::hasPyMethod(const QVariant &object, const QString &method)
-{
-    bool result = false;
-
     Python_ThreadBlock thread_block;
 
-    PyObject *py_object = QVariantToPyObject(object);
+    PyObject *py_object = object->get();
+
     if (py_object)
     {
-        result = CALL_PY(PyObject_HasAttrString)(py_object, method.toLatin1().data()) == 1;
-
-        Py_DECREF(py_object);
-    }
-
-    return result;
-}
-
-QVariant PythonSupport::invokePyMethod(const QVariant &object, const QString &method, const QVariantList &args)
-{
-    QVariant result;
-
-    Python_ThreadBlock thread_block;
-
-    PyObject *py_object = QVariantToPyObject(object);
-    if (py_object)
-    {
-        PyObject *callable = CALL_PY(PyObject_GetAttrString)(py_object, method.toLatin1().data());
-
+        PyObjectPtr callable(CALL_PY(PyObject_GetAttrString)(py_object, method.c_str()));
         if (CALL_PY(PyCallable_Check)(callable))
         {
             CALL_PY(PyErr_Clear)();
 
             bool err = false;
 
-            PyObject *py_args = args.size() > 0 ? CALL_PY(PyTuple_New)(args.size()) : NULL;
+            PyObjectPtr py_args(args.size() > 0 ? CALL_PY(PyTuple_New)(args.size()) : NULL);
 
             int index = 0;
-            Q_FOREACH(const QVariant &arg, args)
+            for (auto arg: args)
             {
-                PyObject *obj = QVariantToPyObject(arg);
+                PyObject *obj = PythonValueVariantToPyObject(arg);
                 if (obj)
                 {
                     // steals reference
@@ -977,12 +804,10 @@ QVariant PythonSupport::invokePyMethod(const QVariant &object, const QString &me
             if (!err)
             {
                 CALL_PY(PyErr_Clear)();
-                PyObject *py_result = CALL_PY(PyObject_CallObject)(callable, py_args);
-
+                PyObjectPtr py_result(CALL_PY(PyObject_CallObject)(callable, py_args));
                 if (py_result)
                 {
-                    result = PyObjectToQVariant(py_result);
-                    Py_DECREF(py_result);
+                    return PyObjectToValueVariant(py_result);
                 }
                 else
                 {
@@ -990,63 +815,56 @@ QVariant PythonSupport::invokePyMethod(const QVariant &object, const QString &me
                     CALL_PY(PyErr_Clear)();
                 }
             }
-
-            Py_XDECREF(py_args);
-            Py_DECREF(callable);
         }
-        Py_DECREF(py_object);
     }
 
-    return result;
+    return PythonValueVariant();
 }
 
 
-QVariant PythonSupport::getAttribute(const QVariant &object, const QString &attribute)
+PythonValueVariant PythonSupport::getAttribute(PyObjectPtr *object, const std::string &attribute)
 {
-    QVariant result;
-
     Python_ThreadBlock thread_block;
 
-    PyObject *py_object = QVariantToPyObject(object);
+    PyObject *py_object = object->get();
+
     if (py_object)
     {
-        PyObject *py_attribute = PyString_FromString(attribute.toLatin1().data());
+        PyObjectPtr py_attribute(CALL_PY(PyUnicode_FromString)(attribute.c_str()));
         if (py_attribute)
         {
             CALL_PY(PyErr_Clear)();
-            PyObject *py_result = CALL_PY(PyObject_GetAttr)(py_object, py_attribute);
+            PyObjectPtr py_result(CALL_PY(PyObject_GetAttr)(py_object, py_attribute));
             if (py_result)
             {
-                result = PyObjectToQVariant(py_result);
-                Py_DECREF(py_result);
+                return PyObjectToValueVariant(py_result);
             }
             else
             {
                 CALL_PY(PyErr_Print)();
                 CALL_PY(PyErr_Clear)();
             }
-            Py_DECREF(py_attribute);
         }
-        Py_DECREF(py_object);
     }
 
-    return result;
+    return PythonValueVariant();
 }
 
 
-bool PythonSupport::setAttribute(const QVariant &object, const QString &attribute, const QVariant &value)
+bool PythonSupport::setAttribute(PyObjectPtr *object, const std::string &attribute, const PythonValueVariant &value)
 {
     int result = 0;
 
     Python_ThreadBlock thread_block;
 
-    PyObject *py_object = QVariantToPyObject(object);
+    PyObject *py_object = object->get();
+
     if (py_object)
     {
-        PyObject *py_attribute = PyString_FromString(attribute.toLatin1().data());
+        PyObject *py_attribute = CALL_PY(PyUnicode_FromString)(attribute.c_str());
         if (py_attribute)
         {
-            PyObject *py_value = QVariantToPyObject(value);
+            PyObject *py_value = PythonValueVariantToPyObject(value);
             if (py_value)
             {
                 CALL_PY(PyErr_Clear)();
@@ -1055,25 +873,21 @@ bool PythonSupport::setAttribute(const QVariant &object, const QString &attribut
             }
             Py_DECREF(py_attribute);
         }
-        Py_DECREF(py_object);
     }
 
     return result != -1;
 }
 
-QImage PythonSupport::scaledImageFromRGBA(PyObject *ndarray_py, const QSize &destination_size)
+void PythonSupport::scaledImageFromRGBA(PyObject *ndarray_py, unsigned int dest_width, unsigned int dest_height, ImageInterface *image)
 {
     PyArrayObject *array = (PyArrayObject *)PyArray_ContiguousFromObject(ndarray_py, NPY_UINT32, 2, 2);
     if (array != NULL)
     {
         long width = PyArray_DIMS(array)[1];
         long height = PyArray_DIMS(array)[0];
-        if (destination_size.width() < width * 0.75 || destination_size.height() < height * 0.75)
+        if (dest_width < width * 0.75 || dest_height < height * 0.75)
         {
-            const long dest_width = destination_size.width();
-            const long dest_height = destination_size.height();
-
-            QImage image((int)dest_width, (int)dest_height, QImage::Format_ARGB32);
+            image->create((int)dest_width, (int)dest_height, ImageFormat::Format_ARGB32);
 
             int *a_buffer = new int[dest_width];
             int *r_buffer = new int[dest_width];
@@ -1099,7 +913,7 @@ QImage PythonSupport::scaledImageFromRGBA(PyObject *ndarray_py, const QSize &des
                 {
                     if (dst_row > 0)
                     {
-                        uint32_t *dst = (uint32_t *)image.scanLine(last_dst_row);
+                        uint32_t *dst = (uint32_t *)image->scanLine(last_dst_row);
                         int *a_ptr = a_buffer;
                         int *r_ptr = r_buffer;
                         int *g_ptr = g_buffer;
@@ -1175,7 +989,7 @@ QImage PythonSupport::scaledImageFromRGBA(PyObject *ndarray_py, const QSize &des
                 *b_ptr += b_sum / mm;
             }
 
-            uint32_t *dst = (uint32_t *)image.scanLine(last_dst_row);
+            uint32_t *dst = (uint32_t *)image->scanLine(last_dst_row);
             int *a_ptr = a_buffer;
             int *r_ptr = r_buffer;
             int *g_ptr = g_buffer;
@@ -1200,38 +1014,32 @@ QImage PythonSupport::scaledImageFromRGBA(PyObject *ndarray_py, const QSize &des
             Py_DECREF(array);
 
             // qDebug() << width << "x" << height << " --> " << dest_width << "x" << dest_height;
-
-            return image;
         }
         else
         {
-            QImage image((int)width, (int)height, QImage::Format_ARGB32);
+            image->create((int)width, (int)height, ImageFormat::Format_ARGB32);
             for (int row=0; row<height; ++row)
-                memcpy(image.scanLine(row), ((uint32_t *)PyArray_DATA(array)) + row*width, width*sizeof(uint32_t));
+                memcpy(image->scanLine(row), ((uint32_t *)PyArray_DATA(array)) + row*width, width*sizeof(uint32_t));
             Py_DECREF(array);
-            return image;
         }
     }
-    return QImage();
 }
 
-QImage PythonSupport::imageFromRGBA(PyObject *ndarray_py)
+void PythonSupport::imageFromRGBA(PyObject *ndarray_py, ImageInterface *image)
 {
     PyArrayObject *array = (PyArrayObject *)PyArray_ContiguousFromObject(ndarray_py, NPY_UINT32, 2, 2);
     if (array != NULL)
     {
         long width = PyArray_DIMS(array)[1];
         long height = PyArray_DIMS(array)[0];
-        QImage image((int)width, (int)height, QImage::Format_ARGB32);
+        image->create((int)width, (int)height, ImageFormat::Format_ARGB32);
         for (int row=0; row<height; ++row)
-            memcpy(image.scanLine(row), ((uint32_t *)PyArray_DATA(array)) + row*width, width*sizeof(uint32_t));
+            memcpy(image->scanLine(row), ((uint32_t *)PyArray_DATA(array)) + row*width, width*sizeof(uint32_t));
         Py_DECREF(array);
-        return image;
     }
-    return QImage();
 }
 
-QImage PythonSupport::scaledImageFromArray(PyObject *ndarray_py, const QSizeF &destination_size, float context_scaling, float display_limit_low, float display_limit_high, PyObject *lookup_table_ndarray)
+void PythonSupport::scaledImageFromArray(PyObject *ndarray_py, float width_, float height_, float context_scaling, float display_limit_low, float display_limit_high, PyObject *lookup_table_ndarray, ImageInterface *image)
 {
     PyArrayObject *array = (PyArrayObject *)PyArray_ContiguousFromObject(ndarray_py, NPY_FLOAT32, 2, 2);
     if (array != NULL)
@@ -1239,7 +1047,7 @@ QImage PythonSupport::scaledImageFromArray(PyObject *ndarray_py, const QSizeF &d
         long width = PyArray_DIMS(array)[1];
         long height = PyArray_DIMS(array)[0];
         float m = display_limit_high != display_limit_low ? 255.0 / (display_limit_high - display_limit_low) : 1;
-        QVector<QRgb> colorTable;
+        std::vector<unsigned int> colorTable;
         if (lookup_table_ndarray != NULL)
         {
             PyArrayObject *lookup_table_array = (PyArrayObject *)PyArray_ContiguousFromObject(lookup_table_ndarray, NPY_UINT32, 1, 1);
@@ -1251,16 +1059,16 @@ QImage PythonSupport::scaledImageFromArray(PyObject *ndarray_py, const QSizeF &d
                 Py_DECREF(lookup_table_array);
             }
         }
-        if (colorTable.length() == 0)
+        if (colorTable.size() == 0)
             for (int i=0; i<256; ++i)
                 colorTable.push_back(0xFF << 24 | i << 16 | i << 8 | i);
 
-        const long dest_width = destination_size.width() * context_scaling;
-        const long dest_height = destination_size.height() * context_scaling;
+        const long dest_width = width_ * context_scaling;
+        const long dest_height = height_ * context_scaling;
 
-        if ((destination_size.width() * context_scaling < width * 0.75 || destination_size.height() * context_scaling < height * 0.75) && (dest_width > 0 && dest_height > 0))
+        if ((width_ * context_scaling < width * 0.75 || height_ * context_scaling < height * 0.75) && (dest_width > 0 && dest_height > 0))
         {
-            QImage image((int)dest_width, (int)dest_height, QImage::Format_Indexed8);
+            image->create((int)dest_width, (int)dest_height, ImageFormat::Format_Indexed8);
 
             float *line_buffer = new float[dest_width];
             long *x_index_buffer = new long[width];
@@ -1283,7 +1091,7 @@ QImage PythonSupport::scaledImageFromArray(PyObject *ndarray_py, const QSizeF &d
                 {
                     if (dst_row > 0)
                     {
-                        uint8_t *dst = (uint8_t *)image.scanLine(last_dst_row);
+                        uint8_t *dst = (uint8_t *)image->scanLine(last_dst_row);
                         float *line_ptr = line_buffer;
                         float mm =  1.0 / (row - last_row_change);
                         for (int dst_col=0; dst_col<dest_width; ++dst_col)
@@ -1331,7 +1139,7 @@ QImage PythonSupport::scaledImageFromArray(PyObject *ndarray_py, const QSizeF &d
                 *line_ptr += sum / (width - last_col_change);
             }
 
-            uint8_t *dst = (uint8_t *)image.scanLine(last_dst_row);
+            uint8_t *dst = (uint8_t *)image->scanLine(last_dst_row);
             float *line_ptr = line_buffer;
             float mm =  1.0 / (height - last_row_change);
             for (int dst_col=0; dst_col<dest_width; ++dst_col)
@@ -1349,20 +1157,18 @@ QImage PythonSupport::scaledImageFromArray(PyObject *ndarray_py, const QSizeF &d
             delete [] x_index_buffer;
             delete [] y_index_buffer;
 
-            image.setColorTable(colorTable);
+            image->setColorTable(colorTable);
             Py_DECREF(array);
 
             // qDebug() << width << "x" << height << " --> " << dest_width << "x" << dest_height;
-
-            return image;
         }
         else
         {
-            QImage image((int)width, (int)height, QImage::Format_Indexed8);
+            image->create((int)width, (int)height, ImageFormat::Format_Indexed8);
             for (int row=0; row<height; ++row)
             {
                 float *src = ((float *)PyArray_DATA(array)) + row*width;
-                uint8_t *dst = (uint8_t *)image.scanLine(row);
+                uint8_t *dst = (uint8_t *)image->scanLine(row);
                 for (int col=0; col<width; ++col)
                 {
                     float v = *src++;
@@ -1374,15 +1180,13 @@ QImage PythonSupport::scaledImageFromArray(PyObject *ndarray_py, const QSizeF &d
                         *dst++ = (unsigned char)((v - display_limit_low) * m);
                 }
             }
-            image.setColorTable(colorTable);
+            image->setColorTable(colorTable);
             Py_DECREF(array);
-            return image;
         }
     }
-    return QImage();
 }
 
-QImage PythonSupport::imageFromArray(PyObject *ndarray_py, float display_limit_low, float display_limit_high, PyObject *lookup_table_ndarray)
+void PythonSupport::imageFromArray(PyObject *ndarray_py, float display_limit_low, float display_limit_high, PyObject *lookup_table_ndarray, ImageInterface *image)
 {
     PyArrayObject *array = (PyArrayObject *)PyArray_ContiguousFromObject(ndarray_py, NPY_FLOAT32, 2, 2);
     if (array != NULL)
@@ -1390,7 +1194,7 @@ QImage PythonSupport::imageFromArray(PyObject *ndarray_py, float display_limit_l
         long width = PyArray_DIMS(array)[1];
         long height = PyArray_DIMS(array)[0];
         float m = display_limit_high != display_limit_low ? 255.0 / (display_limit_high - display_limit_low) : 1;
-        QVector<QRgb> colorTable;
+        std::vector<unsigned int> colorTable;
         if (lookup_table_ndarray != NULL)
         {
             PyArrayObject *lookup_table_array = (PyArrayObject *)PyArray_ContiguousFromObject(lookup_table_ndarray, NPY_UINT32, 1, 1);
@@ -1402,17 +1206,17 @@ QImage PythonSupport::imageFromArray(PyObject *ndarray_py, float display_limit_l
                 Py_DECREF(lookup_table_array);
             }
         }
-        if (colorTable.length() == 0)
+        if (colorTable.size() == 0)
             for (int i=0; i<256; ++i)
                 colorTable.push_back(0xFF << 24 | i << 16 | i << 8 | i);
         if (false)
         {
-            const QRgb *colorTableP = colorTable.constData();
-            QImage image((int)width, (int)height, QImage::Format_ARGB32_Premultiplied);
+            const unsigned int *colorTableP = static_cast<const unsigned int *>(colorTable.data());
+            image->create((int)width, (int)height, ImageFormat::Format_ARGB32_Premultiplied);
             for (int row=0; row<height; ++row)
             {
                 float *src = ((float *)PyArray_DATA(array)) + row*width;
-                uint32_t *dst = (uint32_t *)image.scanLine(row);
+                uint32_t *dst = (uint32_t *)image->scanLine(row);
                 for (int col=0; col<width; ++col)
                 {
                     float v = *src++;
@@ -1428,15 +1232,14 @@ QImage PythonSupport::imageFromArray(PyObject *ndarray_py, float display_limit_l
                 }
             }
             Py_DECREF(array);
-            return image;
         }
         else
         {
-            QImage image((int)width, (int)height, QImage::Format_Indexed8);
+            image->create((int)width, (int)height, ImageFormat::Format_Indexed8);
             for (int row=0; row<height; ++row)
             {
                 float *src = ((float *)PyArray_DATA(array)) + row*width;
-                uint8_t *dst = (uint8_t *)image.scanLine(row);
+                uint8_t *dst = (uint8_t *)image->scanLine(row);
                 for (int col=0; col<width; ++col)
                 {
                     float v = *src++;
@@ -1448,15 +1251,13 @@ QImage PythonSupport::imageFromArray(PyObject *ndarray_py, float display_limit_l
                         *dst++ = (unsigned char)((v - display_limit_low) * m);
                 }
             }
-            image.setColorTable(colorTable);
+            image->setColorTable(colorTable);
             Py_DECREF(array);
-            return image;
         }
     }
-    return QImage();
 }
 
-PyObject *PythonSupport::arrayFromImage(const QImage &image)
+PyObject *PythonSupport::arrayFromImage(const ImageInterface &image)
 {
     Py_ssize_t dims[2];
     dims[0] = image.height();
@@ -1490,18 +1291,18 @@ void PythonSupport::bufferRelease(Py_buffer *buffer)
     CALL_PY(PyBuffer_Release)(buffer);
 }
 
-void PythonSupport::setErrorString(const QString &error_string)
+void PythonSupport::setErrorString(const std::string &error_string)
 {
-    CALL_PY(PyErr_SetString)(module_exception, error_string.toUtf8().constData());
+    CALL_PY(PyErr_SetString)(module_exception, error_string.c_str());
 }
 
-PyObject *PythonSupport::getPyListFromStrings(const QStringList &strings)
+PyObject *PythonSupport::getPyListFromStrings(const std::vector<std::string> &strings)
 {
     PyObject *py_list = CALL_PY(PyList_New)(0);
 
-    Q_FOREACH(const QString &str, strings)
+    for (auto str : strings)
     {
-        PyObject *py_str = PyString_FromString(str.toUtf8().data());
+        PyObject *py_str = PyString_FromString(str.c_str());
         CALL_PY(PyList_Append)(py_list, py_str); //reference to str stolen
     }
 
@@ -1570,7 +1371,7 @@ PyAPI_FUNC(void) _Py_Dealloc(PyObject *o) { _Py_Dealloc_inline(o); }
 
 #if PY_MAJOR_VERSION == 3 && PY_MINOR_VERSION >= 9
 // work around to provide required function that would be available by linking.
-#if defined(Q_OS_WIN)
+#if OS_WINDOWS
 #pragma warning(push)
 #pragma warning(disable: 4273)  // do not warn about conflicting dllimport vs dllexport dll linkage.
 void _Py_Dealloc(PyObject* o) { (*(Py_TYPE(o)->tp_dealloc))(o); }
