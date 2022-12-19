@@ -6,7 +6,7 @@ import sys
 tool_id = "nionswift"
 launcher = "NionSwiftLauncher"
 
-version = "0.4.17"
+version = "0.4.18"
 
 
 def package_files(directory, prefix, prefix_drop):
@@ -116,27 +116,32 @@ dest_drop = None
 
 if sys.platform == "darwin":
     platform = "macosx_10_11_intel"
-    python_version = "cp38.cp39.cp310"
+    python_version = "cp38.cp39.cp310.cp311"
     abi = "abi3"
     dest = "bin"
     dir_path = "launcher/build/Release"
     dest_drop = 3
 if sys.platform == "win32":
     platform = "win_amd64"
-    python_version = "cp38.cp39.cp310"
+    python_version = "cp38.cp39.cp310.cp311"
     abi = "none"
     dest = f"Scripts/{launcher}"
     dir_path = "launcher/x64/Release"
     dest_drop = 3
 if sys.platform == "linux":
     platform = "manylinux1_x86_64"
-    python_version = "cp38.cp39.cp310"
+    python_version = "cp38.cp39.cp310.cp311"
     abi = "abi3"
     dest = f"bin/{launcher}"
     dir_path = "launcher/linux/x64"
     dest_drop = 3
 
 data_files = package_files(dir_path, dest, dest_drop)
+
+def long_description():
+    with open('README.rst', 'r') as fi:
+        result = fi.read()
+    return result
 
 setuptools.setup(
     name=f"{tool_id}-tool",
@@ -147,6 +152,7 @@ setuptools.setup(
     author='Nion Software Team',
     author_email='software@nion.com',
     description='Python command line access to Nion Swift Launcher',
+    long_description = long_description(),
     entry_points={
         'console_scripts': [
             f"{tool_id}-tool=nion.{tool_id}_tool.command:main",

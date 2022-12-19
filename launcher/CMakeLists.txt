@@ -19,7 +19,7 @@ option(USE_CONSOLE "Enable console" ON)
 set(APP_NAME "NionSwiftLauncher")
 
 # app version
-set(APP_VERSION "0.4.17")
+set(APP_VERSION "0.4.18")
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/build)
 
@@ -169,7 +169,10 @@ if (${CMAKE_SYSTEM_NAME} MATCHES "Windows")
     get_filename_component( _dir ${uic_location} DIRECTORY)
     set(deployqt "${_dir}/windeployqt.exe")
     if(NOT EXISTS ${deployqt})
-      message(FATAL_ERROR "Failed to locate deployqt executable: [${deployqt}]")
+      set(deployqt "${_dir}/bin/windeployqt.exe")
+      if(NOT EXISTS ${deployqt})
+        message(FATAL_ERROR "Failed to locate deployqt executable: [${deployqt}]")
+      endif()
     endif()
 
     add_custom_command(TARGET ${APP_NAME}
@@ -210,7 +213,10 @@ if (${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
     get_filename_component( _dir ${uic_location} DIRECTORY)
     set(deployqt "${_dir}/../bin/macdeployqt")
     if(NOT EXISTS ${deployqt})
-      message(FATAL_ERROR "Failed to locate deployqt executable: [${deployqt}]")
+      set(deployqt "${_dir}/bin/macdeployqt")
+      if(NOT EXISTS ${deployqt})
+        message(FATAL_ERROR "Failed to locate deployqt executable: [${deployqt}]")
+      endif()
     endif()
 
     add_custom_command(TARGET ${APP_NAME}
