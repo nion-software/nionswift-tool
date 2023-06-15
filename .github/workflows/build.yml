@@ -19,8 +19,8 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-20.04]
-        python-version: ["3.8", "3.9", "3.10"]
-        qt-version: ["6.4.1"]
+        python-version: ["3.9", "3.10", "3.11"]
+        qt-version: ["6.5.1"]
     steps:
     - uses: actions/checkout@v3
     - name: Set up Python ${{ matrix.python-version }}
@@ -99,9 +99,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-10.15]
-        python-version: ["3.8", "3.9", "3.10"]
-        qt-version: ["6.4.1"]
+        os: [macos-11.0]
+        python-version: ["3.9", "3.10", "3.11"]
+        qt-version: ["6.5.1"]
     steps:
     - uses: actions/checkout@v3
     - name: Set up Python ${{ matrix.python-version }}
@@ -161,8 +161,8 @@ jobs:
       fail-fast: false
       matrix:
         os: [windows-2019]
-        python-version: ["3.8", "3.9", "3.10"]
-        qt-version: ["6.4.1"]
+        python-version: ["3.9", "3.10", "3.11"]
+        qt-version: ["6.5.1"]
     steps:
     - uses: actions/checkout@v3
     - name: Set up Python ${{ matrix.python-version }}
@@ -227,7 +227,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-20.04, ubuntu-22.04]
-        python-version: ["3.8", "3.9", "3.10"]
+        python-version: ["3.9", "3.10", "3.11"]
     steps:
     - uses: actions/checkout@v3
     - name: Download Wheel
@@ -253,7 +253,7 @@ jobs:
         # libopengl0: see https://bugreports.qt.io/browse/QTBUG-89754
         sudo apt-get install libopengl0 -y
         # see https://doc.qt.io/qt-6/linux-requirements.html
-        sudo apt-get install libegl1 libfontconfig1 libfreetype6 libxcb1 libxcb-glx0 libxcb-keysyms1 libxcb-image0 libxcb-shm0 libxcb-icccm4 libxcb-xfixes0 libxcb-shape0 libxcb-randr0 libxcb-render-util0 libxcb-xinerama0 libxcb-xkb1 libxkbcommon-x11-0 -y
+        sudo apt-get install libegl1 libfontconfig1 libfreetype6 libxcb1 libxcb-glx0 libxcb-keysyms1 libxcb-image0 libxcb-shm0 libxcb-icccm4 libxcb-xfixes0 libxcb-shape0 libxcb-randr0 libxcb-render-util0 libxcb-xinerama0 libxcb-xkb1 libxkbcommon-x11-0 libxcb-sync1 libxcb-cursor0 -y
         # sudo apt-get install libx11 libx11-xcb libxext libxfixes libxi libxrender libxcb-sync libxcb-util libxkbcommon
     - name: Test system Python installed with official build with virtual environment
       shell: bash
@@ -272,6 +272,7 @@ jobs:
         python -m pip install .
         popd
         echo "Running test... ${{ env.tool-exe }}"
+        xvfb-run ${{ env.tool-exe }} nionui_app.test_ack
         xvfb-run ${{ env.tool-exe }} nionui_app.test_ack | grep ACK
         deactivate
     - name: Set up Miniconda ${{ matrix.python-version }}
@@ -292,6 +293,7 @@ jobs:
         popd
         echo "Running test..."
         conda list
+        xvfb-run ${{ env.tool-exe }} nionui_app.test_ack
         xvfb-run ${{ env.tool-exe }} nionui_app.test_ack | grep ACK
     - name: Test Conda Forge
       shell: bash -l {0}
@@ -306,18 +308,19 @@ jobs:
         popd
         echo "Running test..."
         conda list
+        xvfb-run ${{ env.tool-exe }} nionui_app.test_ack
         xvfb-run ${{ env.tool-exe }} nionui_app.test_ack | grep ACK
         conda deactivate
     - name: Publish package to PyPI
       uses: pypa/gh-action-pypi-publish@release/v1
-      if: github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags') && matrix.python-version == '3.8'
+      if: github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags') && matrix.os == 'ubuntu-20.04' && matrix.python-version == '3.9'
       with:
         skip_existing: true
         user: __token__
         packages_dir: ${{steps.download_wheel.outputs.download-path}}
         password: ${{ secrets.PYPI_PASSWORD }}
     - name: Build/publish anaconda package
-      if: github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags')
+      if: github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags') && matrix.os == 'ubuntu-20.04'
       shell: bash -l {0}
       run: |
         conda info
@@ -329,8 +332,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-10.15]
-        python-version: ["3.8", "3.9", "3.10"]
+        os: [macos-11.0]
+        python-version: ["3.9", "3.10", "3.11"]
     steps:
     - uses: actions/checkout@v3
     - name: Download Wheel
@@ -363,6 +366,7 @@ jobs:
         python -m pip install .
         popd
         echo "Running test..."
+        ${{ env.tool-exe }} nionui_app.test_ack
         ${{ env.tool-exe }} nionui_app.test_ack | grep ACK
     - name: Set up Python ${{ matrix.python-version }} with official build
       uses: actions/setup-python@v4
@@ -384,6 +388,7 @@ jobs:
         python -m pip install .
         popd
         echo "Running test..."
+        ${{ env.tool-exe }} nionui_app.test_ack
         ${{ env.tool-exe }} nionui_app.test_ack | grep ACK
         deactivate
     - name: Set up Miniconda ${{ matrix.python-version }}
@@ -404,6 +409,7 @@ jobs:
         popd
         echo "Running test..."
         conda list
+        ${{ env.tool-exe }} nionui_app.test_ack
         ${{ env.tool-exe }} nionui_app.test_ack | grep ACK
     - name: Test Conda Forge
       shell: bash -l {0}
@@ -419,23 +425,24 @@ jobs:
         popd
         echo "Running test..."
         conda list
+        ${{ env.tool-exe }} nionui_app.test_ack
         ${{ env.tool-exe }} nionui_app.test_ack | grep ACK
         conda deactivate
     - name: Publish package to PyPI
-      if: github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags') && matrix.python-version == '3.8'
+      if: github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags') && matrix.os == 'macos-11.0' && matrix.python-version == '3.9'
       shell: pwsh
       run: |
         conda info
         pip install twine
         twine --version
-        twine upload --repository-url https://test.pypi.org/legacy/ --username __token__ --password ${{ secrets.TEST_PYPI_PASSWORD }} --non-interactive --skip-existing --verbose ${{steps.download_wheel.outputs.download-path}}/*.whl
+        twine upload --username __token__ --password ${{ secrets.PYPI_PASSWORD }} --non-interactive --skip-existing --verbose ${{steps.download_wheel.outputs.download-path}}/*.whl
     - name: Build/publish anaconda package
-      if: github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags')
+      if: github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags') && matrix.os == 'macos-11.0'
       shell: bash -l {0}
       run: |
         conda info
         conda install anaconda-client -y
-        # anaconda --token ${{ secrets.anaconda_token }} upload --user nion --skip-existing ${{steps.download_conda.outputs.download-path}}/*.tar.bz2
+        anaconda --token ${{ secrets.anaconda_token }} upload --user nion --skip-existing ${{steps.download_conda.outputs.download-path}}/*.tar.bz2
   test_win:
     needs: build_win
     runs-on: ${{ matrix.os }}
@@ -443,7 +450,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [windows-2019]
-        python-version: ["3.8", "3.9", "3.10"]
+        python-version: ["3.9", "3.10", "3.11"]
     steps:
     - uses: actions/checkout@v3
     - name: Download Wheel
@@ -479,6 +486,7 @@ jobs:
         python -m pip install .
         popd
         echo "Running test..."
+        ${{ env.tool-exe }} nionui_app.test_ack
         ${{ env.tool-exe }} nionui_app.test_ack | grep ACK
         deactivate
     - name: Set up Miniconda ${{ matrix.python-version }}
@@ -500,6 +508,7 @@ jobs:
         popd
         echo "Running test..."
         conda list
+        ${{ env.tool-exe }} nionui_app.test_ack
         ${{ env.tool-exe }} nionui_app.test_ack | grep ACK
     - name: Test Conda Forge
       shell: pwsh
@@ -515,10 +524,11 @@ jobs:
         popd
         echo "Running test..."
         conda list
+        ${{ env.tool-exe }} nionui_app.test_ack
         ${{ env.tool-exe }} nionui_app.test_ack | grep ACK
         conda deactivate
     - name: Publish package to PyPI
-      if: github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags') && matrix.python-version == '3.8'
+      if: github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags') && matrix.os == 'windows-2019' && matrix.python-version == '3.9'
       shell: pwsh
       run: |
         conda info
@@ -526,7 +536,7 @@ jobs:
         twine --version
         twine upload --username __token__ --password ${{ secrets.PYPI_PASSWORD }} --non-interactive --skip-existing --verbose ${{steps.download_wheel.outputs.download-path}}\*.whl
     - name: Build/publish anaconda package
-      if: github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags')
+      if: github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags') && matrix.os == 'windows-2019'
       shell: pwsh
       run: |
         conda info

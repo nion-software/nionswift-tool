@@ -19,7 +19,7 @@ option(USE_CONSOLE "Enable console" ON)
 set(APP_NAME "NionSwiftLauncher")
 
 # app version
-set(APP_VERSION "0.4.18")
+set(APP_VERSION "0.4.19")
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/build)
 
@@ -184,7 +184,7 @@ endif()
 if (${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
 
     set(APP_EXECUTABLE "Nion Swift")
-    set(CMAKE_OSX_DEPLOYMENT_TARGET 10.14)
+    set(CMAKE_OSX_DEPLOYMENT_TARGET 11.0)
     set(MACOSX_BUNDLE_BUNDLE_NAME ${APP_EXECUTABLE})
     set(MACOSX_BUNDLE_GUI_IDENTIFIER "com.nion.swift.launcher")
     set(MACOSX_BUNDLE_ICON_FILE "MacIcon.icns")
