@@ -1,12 +1,13 @@
 import os
 import pathlib
+import platform as platform_module
 import setuptools
 import sys
 
 tool_id = "nionswift"
 launcher = "NionSwiftLauncher"
 
-version = "0.4.19"
+version = "0.4.20"
 
 
 def package_files(directory, prefix, prefix_drop):
@@ -115,22 +116,22 @@ dir_path = None
 dest_drop = None
 
 if sys.platform == "darwin":
-    platform = "macosx_10_11_intel"
-    python_version = "cp38.cp39.cp310.cp311"
+    platform = "macosx_10_11_intel" if platform_module.processor() != "arm" else "macosx_11_0_arm64"
+    python_version = "cp39.cp310.cp311"
     abi = "abi3"
     dest = "bin"
     dir_path = "launcher/build/Release"
     dest_drop = 3
 if sys.platform == "win32":
     platform = "win_amd64"
-    python_version = "cp38.cp39.cp310.cp311"
+    python_version = "cp39.cp310.cp311"
     abi = "none"
     dest = f"Scripts/{launcher}"
     dir_path = "launcher/x64/Release"
     dest_drop = 3
 if sys.platform == "linux":
     platform = "manylinux1_x86_64"
-    python_version = "cp38.cp39.cp310.cp311"
+    python_version = "cp39.cp310.cp311"
     abi = "abi3"
     dest = f"bin/{launcher}"
     dir_path = "launcher/linux/x64"
@@ -158,9 +159,6 @@ setuptools.setup(
             f"{tool_id}-tool=nion.{tool_id}_tool.command:main",
         ],
     },
-    install_requires=[
-        "setuptools",  # for pkg_resources
-        ],
     data_files=data_files,
     distclass=BinaryDistribution,
     cmdclass={'bdist_wheel': bdist_wheel},

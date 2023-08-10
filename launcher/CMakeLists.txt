@@ -19,7 +19,7 @@ option(USE_CONSOLE "Enable console" ON)
 set(APP_NAME "NionSwiftLauncher")
 
 # app version
-set(APP_VERSION "0.4.19")
+set(APP_VERSION "0.4.20")
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/build)
 
@@ -189,7 +189,7 @@ if (${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
     set(MACOSX_BUNDLE_GUI_IDENTIFIER "com.nion.swift.launcher")
     set(MACOSX_BUNDLE_ICON_FILE "MacIcon.icns")
     #set(MACOSX_BUNDLE_SHORT_VERSION_STRING ${APP_VERSION})
-    set(MACOSX_BUNDLE_COPYRIGHT "Copyright © 2012-2021 Nion Company. All rights reserved.")
+    set(MACOSX_BUNDLE_COPYRIGHT "Copyright © 2012-2023 Nion Company. All rights reserved.")
     # mark the icons file as part of the sources
     target_sources(${APP_NAME} PRIVATE Graphics/MacIcon.icns)
     # set the location of the icon file
