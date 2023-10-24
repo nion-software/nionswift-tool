@@ -6,7 +6,7 @@
 {% set win_exe = "NionSwift" %}
 {% set summary = "A native launcher for Nion Swift." %}
 
-{% set version = "0.4.20" %}
+{% set version = "0.4.21" %}
 
 {% set name_u = name|replace('-', '_') %}
 
@@ -31,7 +31,7 @@ requirements:
     - python
     - pip
     - setuptools
-    - numpy 1.24.*
+    - numpy 1.26.*
   run:
     - python
     - setuptools
