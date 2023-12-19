@@ -136,7 +136,7 @@ jobs:
         MACOS_KEYCHAIN_PASSWORD: ${{ secrets.MACOS_KEYCHAIN_PASSWORD }}
         MACOS_DEVELOPER_TEAM_ID: ${{ secrets.MACOS_DEVELOPER_TEAM_ID }}
       run: |
-        APPNAME="Nion UI Launcher"
+        APPNAME="Nion Swift"
         python -m pip install --upgrade pip
         python -m pip install install packaging
         python -m pip install install "numpy>=1.26,<1.27"
