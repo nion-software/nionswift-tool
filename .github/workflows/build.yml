@@ -20,11 +20,11 @@ jobs:
       matrix:
         os: [ubuntu-20.04]
         python-version: ["3.9", "3.10", "3.11", "3.12"]
-        qt-version: ["6.6.1"]
+        qt-version: ["6.7.1"]
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: ${{ matrix.python-version }}
     - name: Display Python version
@@ -38,7 +38,7 @@ jobs:
         version: ${{ matrix.qt-version }}
         host: 'linux'
         target: 'desktop'
-        arch: 'gcc_64'
+        arch: 'linux_gcc_64'
     - name: Build
       shell: bash
       run: |
@@ -59,15 +59,15 @@ jobs:
         cp ../Qt/${{ matrix.qt-version }}/gcc_64/lib/libQt6OpenGL.so.6 launcher/linux/x64
         cp ../Qt/${{ matrix.qt-version }}/gcc_64/lib/libQt6Widgets.so.6 launcher/linux/x64
         cp ../Qt/${{ matrix.qt-version }}/gcc_64/lib/libQt6XcbQpa.so.6 launcher/linux/x64
-        cp ../Qt/${{ matrix.qt-version }}/gcc_64/lib/libicui18n.so.56 launcher/linux/x64
-        cp ../Qt/${{ matrix.qt-version }}/gcc_64/lib/libicudata.so.56 launcher/linux/x64
-        cp ../Qt/${{ matrix.qt-version }}/gcc_64/lib/libicuuc.so.56 launcher/linux/x64
+        cp ../Qt/${{ matrix.qt-version }}/gcc_64/lib/libicui18n.so.73 launcher/linux/x64
+        cp ../Qt/${{ matrix.qt-version }}/gcc_64/lib/libicudata.so.73 launcher/linux/x64
+        cp ../Qt/${{ matrix.qt-version }}/gcc_64/lib/libicuuc.so.73 launcher/linux/x64
         mkdir -p launcher/linux/x64/plugins/platforms
         mkdir -p launcher/linux/x64/plugins/imageformats
         cp ../Qt/${{ matrix.qt-version }}/gcc_64/plugins/platforms/libqxcb.so launcher/linux/x64/plugins/platforms
         cp ../Qt/${{ matrix.qt-version }}/gcc_64/plugins/imageformats/libq* launcher/linux/x64/plugins/imageformats
         rm launcher/linux/x64/plugins/imageformats/libqsvg.so
-        chrpath -r "\$ORIGIN" launcher/linux/x64/libicu*.so.56
+        chrpath -r "\$ORIGIN" launcher/linux/x64/libicu*.so.73
         chrpath -r "\$ORIGIN/../.." launcher/linux/x64/plugins/platforms/libqxcb.so
         chrpath -r "\$ORIGIN/../.." launcher/linux/x64/plugins/imageformats/*.so
         printf "[Paths]\nPrefix=.\nPlugins=plugins\n" > launcher/linux/x64/qt.conf
@@ -88,12 +88,12 @@ jobs:
         OUT_FILE=$(conda build --python ${{ matrix.python-version }} --output ./.github/workflows/recipe)
         mv $OUT_FILE dist
     - name: Upload Wheel
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: ${{ env.tool-id }}-linux-whl-${{ matrix.python-version }}
         path: dist/*.whl
     - name: Upload Conda Package
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: ${{ env.tool-id }}-linux-conda-${{ matrix.python-version }}
         path: dist/*.tar.bz2
@@ -102,19 +102,19 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-11.0]
+        os: [macos-12]
         python-version: ["3.9", "3.10", "3.11", "3.12"]
         architecture: [x86_64]
-        qt-version: ["6.6.1"]
+        qt-version: ["6.7.1"]
         include:
-            - os: macos-latest-xlarge
+            - os: macos-14
               python-version: "3.12"
               architecture: arm64
-              qt-version: "6.6.1"
+              qt-version: "6.7.1"
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: ${{ matrix.python-version }}
     - name: Display Python version
@@ -178,7 +178,7 @@ jobs:
         popd
         python setup.py bdist_wheel
     - name: Upload Wheel
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: ${{ env.tool-id }}-macos-whl-${{ matrix.architecture }}-${{ matrix.python-version }}
         path: dist/*.whl
@@ -199,7 +199,7 @@ jobs:
         OUT_FILE=$(conda build --python ${{ matrix.python-version }} --output ./.github/workflows/recipe)
         mv $OUT_FILE dist
     - name: Upload Conda Package
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: ${{ env.tool-id }}-macos-conda-${{ matrix.architecture }}-${{ matrix.python-version }}
         path: dist/*.tar.bz2
@@ -210,11 +210,11 @@ jobs:
       matrix:
         os: [windows-2019]
         python-version: ["3.9", "3.10", "3.11", "3.12"]
-        qt-version: ["6.6.1"]
+        qt-version: ["6.7.1"]
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: ${{ matrix.python-version }}
     - name: Display Python version
@@ -262,12 +262,12 @@ jobs:
         OUT_FILE=$(conda build --python ${{ matrix.python-version }} --output ./.github/workflows/recipe)
         mv $OUT_FILE dist
     - name: Upload Wheel
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: ${{ env.tool-id }}-win-whl-${{ matrix.python-version }}
         path: dist/*.whl
     - name: Upload Conda Package
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: ${{ env.tool-id }}-win-conda-${{ matrix.python-version }}
         path: dist/*.tar.bz2
@@ -277,24 +277,24 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-20.04, ubuntu-22.04]
+        os: [ubuntu-20.04, ubuntu-22.04, ubuntu-24.04]
         python-version: ["3.9", "3.10", "3.11", "3.12"]
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - name: Download Wheel
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       id: download_wheel
       with:
         name: ${{ env.tool-id }}-linux-whl-${{ matrix.python-version }}
         path: downloads
     - name: Download Conda
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       id: download_conda
       with:
         name: ${{ env.tool-id }}-linux-conda-${{ matrix.python-version }}
         path: conda_downloads
     - name: Set up Python ${{ matrix.python-version }} with official build
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: ${{ matrix.python-version }}
     - name: Virtual screen
@@ -397,29 +397,33 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-11.0]
+        os: [macos-12]
         python-version: ["3.9", "3.10", "3.11", "3.12"]
         architecture: [x86_64]
-        qt-version: ["6.6.1"]
+        qt-version: ["6.7.1"]
         include:
-            - os: macos-latest-xlarge
+            - os: macos-14
               python-version: "3.12"
               architecture: arm64
-              qt-version: "6.6.1"
+              qt-version: "6.7.1"
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - name: Download Wheel
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       id: download_wheel
       with:
         name: ${{ env.tool-id }}-macos-whl-${{ matrix.architecture }}-${{ matrix.python-version }}
         path: downloads
     - name: Download Conda
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       id: download_conda
       with:
         name: ${{ env.tool-id }}-macos-conda-${{ matrix.architecture }}-${{ matrix.python-version }}
         path: conda_downloads
+    - name: Set up Python ${{ matrix.python-version }} with official build
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
     - name: Test system Python installed with brew with virtual environment
       shell: bash
       run: |
@@ -440,10 +444,6 @@ jobs:
         echo "Running test..."
         ${{ env.tool-exe }} nionui_app.test_ack
         ${{ env.tool-exe }} nionui_app.test_ack | grep ACK
-    - name: Set up Python ${{ matrix.python-version }} with official build
-      uses: actions/setup-python@v4
-      with:
-        python-version: ${{ matrix.python-version }}
     - name: Test system Python installed with official build with virtual environment
       shell: bash
       run: |
@@ -531,21 +531,21 @@ jobs:
         os: [windows-2019]
         python-version: ["3.9", "3.10", "3.11", "3.12"]
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - name: Download Wheel
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       id: download_wheel
       with:
         name: ${{ env.tool-id }}-win-whl-${{ matrix.python-version }}
         path: downloads
     - name: Download Conda
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       id: download_conda
       with:
         name: ${{ env.tool-id }}-win-conda-${{ matrix.python-version }}
         path: conda_downloads
     - name: Set up Python ${{ matrix.python-version }} with official build
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: ${{ matrix.python-version }}
     - name: Test system Python installed with official build with virtual environment
@@ -635,7 +635,7 @@ jobs:
       id-token: write  # IMPORTANT: this permission is mandatory for trusted publishing
     steps:
     - name: Download All Artifacts
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
     - name: Remove all the files except the ones to upload to PyPI.
       shell: bash
       run: |

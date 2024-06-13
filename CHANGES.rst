@@ -1,6 +1,10 @@
 Changelog (nionswift-tool)
 ==========================
 
+0.4.24 (2024-06-12)
+-------------------
+- Update Qt to 6.7.1
+
 0.4.23 (2024-01-22)
 -------------------
 - Add support for responding to color scheme changes (light/dark mode).

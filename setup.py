@@ -7,7 +7,7 @@ import sys
 tool_id = "nionswift"
 launcher = "NionSwiftLauncher"
 
-version = "0.4.23"
+version = "0.4.24"
 
 
 def package_files(directory, prefix, prefix_drop):
