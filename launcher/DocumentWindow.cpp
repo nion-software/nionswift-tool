@@ -4,6 +4,16 @@
 
 #include <stdint.h>
 
+#if defined(__APPLE__)
+#include <mach/mach_time.h> /* mach_absolute_time */
+#endif
+#if defined(_WIN32) || defined(_WIN64)
+#include <chrono>
+#endif
+#if defined(__linux__)
+#include <time.h>
+#endif
+
 #include <QtCore/QtGlobal>
 #include <QtCore/QAbstractListModel>
 #include <QtCore/QDateTime>
@@ -81,6 +91,63 @@ QColor ParseColorString(const QString &color_string)
     return color;
 }
 
+class RepaintManager
+{
+public:
+    RepaintManager()
+    {
+    }
+
+    void requestRepaint(QWidget *window, PyCanvas *canvas)
+    {
+        QMutexLocker locker(&mutex);
+
+        for (const auto &p : requests)
+        {
+            if (p.first == window && p.second == canvas)
+                return;
+        }
+
+        requests.push_back(std::pair<QWidget *, PyCanvas *>(window, canvas));
+    }
+
+    void cancelRepaintRequest(PyCanvas *canvas)
+    {
+        QMutexLocker locker(&mutex);
+
+        std::list<std::pair<QWidget *, PyCanvas *>> new_requests;
+
+        for (const auto &p : requests)
+        {
+            if (p.second != canvas)
+                new_requests.push_back(p);
+        }
+
+        requests = new_requests;
+    }
+
+    void update(QWidget *widget)
+    {
+        // ideally only the passed widget could be updated; the widget may be a QDockWidget
+        // which never calls update; so as a workaround, just update everything and clear the list.
+        // this may be a problem (too many updates) in the future with multiple document windows.
+        QMutexLocker locker(&mutex);
+
+        for (const auto &p : requests)
+        {
+            p.second->update();
+        }
+
+        requests.clear();
+    }
+
+private:
+    QMutex mutex;
+    std::list<std::pair<QWidget *, PyCanvas *>> requests;
+};
+
+RepaintManager repaintManager;
+
 DocumentWindow::DocumentWindow(const QString &title, QWidget *parent)
     : QMainWindow(parent)
     , m_closed(false)
@@ -110,7 +177,7 @@ DocumentWindow::DocumentWindow(const QString &title, QWidget *parent)
 void DocumentWindow::initialize()
 {
     // start the timer event
-    m_periodic_timer = startTimer(20);
+    m_periodic_timer = startTimer(25);
 
     // reset it here until it is really modified
     cleanDocument();
@@ -124,7 +191,10 @@ Application *DocumentWindow::application() const
 void DocumentWindow::timerEvent(QTimerEvent *event)
 {
     if (event->timerId() == m_periodic_timer && isVisible())
+    {
+        repaintManager.update(this);
         application()->dispatchPyMethod(m_py_object, "periodic", QVariantList());
+    }
 }
 
 void DocumentWindow::hideEvent(QHideEvent *hide_event)
@@ -433,7 +503,6 @@ void PyPushButton::clicked()
 
 PyRadioButton::PyRadioButton()
 {
-    setAutoExclusive(false);
     connect(this, SIGNAL(clicked()), this, SLOT(clicked()));
 }
 
@@ -488,6 +557,28 @@ void PyComboBox::currentTextChanged(const QString &currentText)
         Application *app = dynamic_cast<Application *>(QCoreApplication::instance());
         app->dispatchPyMethod(m_py_object, "currentTextChanged", QVariantList() << currentText);
     }
+}
+
+void PyComboBox::wheelEvent(QWheelEvent* event)
+{
+    if (this->isExpanded())
+    {
+        //If we are expanded, treat as normal
+        QComboBox::wheelEvent(event);
+    }
+    else
+    {
+        //If we are not expanded, discard
+        event->ignore();
+    }
+}
+
+bool PyComboBox::isExpanded()
+{
+    auto view = this->view();
+    if (view == nullptr) 
+        return false; //It can't be expanded if it doesn't exist.
+    return view->isVisible();
 }
 
 PySlider::PySlider()
@@ -558,6 +649,32 @@ void PyLineEdit::textEdited(const QString &text)
         Application *app = dynamic_cast<Application *>(QCoreApplication::instance());
         app->dispatchPyMethod(m_py_object, "textEdited", QVariantList() << text);
     }
+}
+
+void PyLineEdit::focusInEvent(QFocusEvent *event)
+{
+    Q_UNUSED(event)
+
+    if (m_py_object.isValid())
+    {
+        Application *app = dynamic_cast<Application *>(QCoreApplication::instance());
+        app->dispatchPyMethod(m_py_object, "focusIn", QVariantList());
+    }
+
+    QLineEdit::focusInEvent(event);
+}
+
+void PyLineEdit::focusOutEvent(QFocusEvent *event)
+{
+    Q_UNUSED(event)
+
+    if (m_py_object.isValid())
+    {
+        Application *app = dynamic_cast<Application *>(QCoreApplication::instance());
+        app->dispatchPyMethod(m_py_object, "focusOut", QVariantList());
+    }
+
+    QLineEdit::focusOutEvent(event);
 }
 
 void PyLineEdit::keyPressEvent(QKeyEvent *key_event)
@@ -1059,20 +1176,11 @@ struct DrawingContextState
     float context_scaling_y;
 };
 
-void PaintCommands(QPainter &painter, const QList<CanvasDrawingCommand> &commands, PaintImageCache *image_cache, float display_scaling)
+void PaintCommands(QPainter &painter, const QList<CanvasDrawingCommand> &commands, float display_scaling)
 {
     QPainterPath path;
 
     display_scaling = display_scaling ? display_scaling : GetDisplayScaling();
-
-    if (image_cache)
-    {
-        Q_FOREACH(int image_id, image_cache->keys())
-        {
-            PaintImageCacheEntry &entry = (*image_cache)[image_id];
-            entry.used = false;
-        }
-    }
 
     QColor fill_color(Qt::transparent);
     int fill_gradient = -1;
@@ -1343,91 +1451,59 @@ void PaintCommands(QPainter &painter, const QList<CanvasDrawingCommand> &command
             int width = args[1].toInt();
             int height = args[2].toInt();
 
-            int image_id = args[3].toInt();
+            QImageInterface image;
 
-            if (image_cache && image_cache->contains(image_id))
+            QRectF destination_rect(QPointF(args[4].toFloat() * display_scaling, args[5].toFloat() * display_scaling), QSizeF(args[6].toFloat() * display_scaling, args[7].toFloat() * display_scaling));
+            float context_scaling = qMin(context_scaling_x, context_scaling_y);
+            QSize destination_size((destination_rect.size() * context_scaling).toSize());
+
             {
-                (*image_cache)[image_id].used = true;
-                QImage image = (*image_cache)[image_id].image;
-                painter.drawImage(QRectF(QPointF(args[4].toFloat() * display_scaling, args[5].toFloat() * display_scaling), QSizeF(args[6].toFloat() * display_scaling, args[7].toFloat() * display_scaling)), image);
+                Python_ThreadBlock thread_block;
+
+                // Grab the ndarray
+                PyObjectPtr ndarray_py(QVariantToPyObject(args[2]));
+                if (ndarray_py)
+                {
+                    PythonSupport::instance()->imageFromRGBA(ndarray_py, &image);
+                }
             }
-            else
+
+            if (!image.image.isNull())
             {
-                QImageInterface image;
-
-                QRectF destination_rect(QPointF(args[4].toFloat() * display_scaling, args[5].toFloat() * display_scaling), QSizeF(args[6].toFloat() * display_scaling, args[7].toFloat() * display_scaling));
-                float context_scaling = qMin(context_scaling_x, context_scaling_y);
-                QSize destination_size((destination_rect.size() * context_scaling).toSize());
-
+                if (destination_size.width() < width * 0.75 || destination_size.height() < height * 0.75)
                 {
-                    Python_ThreadBlock thread_block;
-
-                    // Grab the ndarray
-                    PyObjectPtr ndarray_py(QVariantToPyObject(args[2]));
-                    if (ndarray_py)
-                    {
-                        PythonSupport::instance()->imageFromRGBA(ndarray_py, &image);
-                    }
+                    image.image = image.image.scaled((destination_rect.size() * context_scaling).toSize(), Qt::KeepAspectRatio, Qt::SmoothTransformation);
                 }
-
-                if (!image.image.isNull())
-                {
-                    if (destination_size.width() < width * 0.75 || destination_size.height() < height * 0.75)
-                    {
-                        image.image = image.image.scaled((destination_rect.size() * context_scaling).toSize(), Qt::KeepAspectRatio, Qt::SmoothTransformation);
-                    }
-                    painter.drawImage(destination_rect, image.image);
-                    if (image_cache)
-                    {
-                        PaintImageCacheEntry cache_entry(image_id, true, image.image);
-                        (*image_cache)[image_id] = cache_entry;
-                    }
-                }
+                painter.drawImage(destination_rect, image.image);
             }
         }
         else if (cmd == "data")
         {
-            int image_id = args[3].toInt();
+            QImageInterface image;
 
-            if (image_cache && image_cache->contains(image_id))
+            QRectF destination_rect(QPointF(args[4].toFloat() * display_scaling, args[5].toFloat() * display_scaling), QSizeF(args[6].toFloat() * display_scaling, args[7].toFloat() * display_scaling));
+            float context_scaling = qMin(context_scaling_x, context_scaling_y);
+
             {
-                (*image_cache)[image_id].used = true;
-                QImage image = (*image_cache)[image_id].image;
-                painter.drawImage(QRectF(QPointF(args[4].toFloat() * display_scaling, args[5].toFloat() * display_scaling), QSizeF(args[6].toFloat() * display_scaling, args[7].toFloat() * display_scaling)), image);
+                Python_ThreadBlock thread_block;
+
+                // Grab the ndarray
+                PyObjectPtr ndarray_py(QVariantToPyObject(args[2]));
+
+                if (ndarray_py)
+                {
+                    PyObject *colormap_ndarray_py = NULL;
+
+                    if (args[10].toInt() != 0)
+                        colormap_ndarray_py = QVariantToPyObject(args[10]);
+
+                    PythonSupport::instance()->scaledImageFromArray(ndarray_py, destination_rect.width(), destination_rect.height(), context_scaling, args[8].toFloat(), args[9].toFloat(), colormap_ndarray_py, &image);
+                }
             }
-            else
+
+            if (!image.image.isNull())
             {
-                QImageInterface image;
-
-                QRectF destination_rect(QPointF(args[4].toFloat() * display_scaling, args[5].toFloat() * display_scaling), QSizeF(args[6].toFloat() * display_scaling, args[7].toFloat() * display_scaling));
-                float context_scaling = qMin(context_scaling_x, context_scaling_y);
-
-                {
-                    Python_ThreadBlock thread_block;
-
-                    // Grab the ndarray
-                    PyObjectPtr ndarray_py(QVariantToPyObject(args[2]));
-
-                    if (ndarray_py)
-                    {
-                        PyObject *colormap_ndarray_py = NULL;
-
-                        if (args[10].toInt() != 0)
-                            colormap_ndarray_py = QVariantToPyObject(args[10]);
-
-                        PythonSupport::instance()->scaledImageFromArray(ndarray_py, destination_rect.width(), destination_rect.height(), context_scaling, args[8].toFloat(), args[9].toFloat(), colormap_ndarray_py, &image);
-                    }
-                }
-
-                if (!image.image.isNull())
-                {
-                    painter.drawImage(destination_rect, image.image);
-                    if (image_cache)
-                    {
-                        PaintImageCacheEntry cache_entry(image_id, true, image.image);
-                        (*image_cache)[image_id] = cache_entry;
-                    }
-                }
+                painter.drawImage(destination_rect, image.image);
             }
         }
         else if (cmd == "stroke")
@@ -1584,26 +1660,6 @@ void PaintCommands(QPainter &painter, const QList<CanvasDrawingCommand> &command
         else if (cmd == "timestamp")
         {
         }
-        else if (cmd == "begin_layer")
-        {
-        }
-        else if (cmd == "end_layer")
-        {
-        }
-        else if (cmd == "draw_layer")
-        {
-        }
-    }
-
-    if (image_cache)
-    {
-        Q_FOREACH(int image_id, image_cache->keys())
-        {
-            if (!(*image_cache)[image_id].used)
-            {
-                image_cache->remove(image_id);
-            }
-        }
     }
 }
 
@@ -1643,29 +1699,15 @@ inline QString read_string(const quint32 *commands, unsigned int &command_index)
 
 struct NullDeleter {template<typename T> void operator()(T*) {} };
 
-RenderedTimeStamps PaintBinaryCommands(QPainter *rawPainter, const std::vector<quint32> commands_v, const QMap<QString, QVariant> &imageMap, PaintImageCache *image_cache, LayerCache *layer_cache, float display_scaling, int section_id, float devicePixelRatio)
+RenderedTimeStamps PaintBinaryCommands(QPainter *rawPainter, const CommandsSharedPtr &commands_v, const QMap<QString, QVariant> &imageMap, const RenderedTimeStamps &lastRenderedTimestamps, float display_scaling, int section_id, float devicePixelRatio)
 {
     QSharedPointer<QPainter> painter(rawPainter, NullDeleter());
 
     RenderedTimeStamps rendered_timestamps;
 
-    // this will keep track of the total scaling applied in nested layers. it is used to
-    // update the rendered_timestamps with the proper global transform, which will be drawn
-    // at the top level and should not have resolution transforms applied.
-    float transform_scaling = 1.0;
-
     display_scaling = display_scaling ? display_scaling : GetDisplayScaling();
 
     QPainterPath path;
-
-    if (image_cache)
-    {
-        Q_FOREACH(int image_id, image_cache->keys())
-        {
-            PaintImageCacheEntry &entry = (*image_cache)[image_id];
-            entry.used = false;
-        }
-    }
 
     QColor fill_color(Qt::transparent);
     int fill_gradient = -1;
@@ -1689,21 +1731,14 @@ RenderedTimeStamps PaintBinaryCommands(QPainter *rawPainter, const std::vector<q
 
     QList<DrawingContextState> stack;
 
-    QSet<int> layers_used;
-    bool layer_skip = false;
-    QSharedPointer<QImage> layer_image;
-    QList<QSharedPointer<QPainter> > painter_stack;
-    QList<QSharedPointer<QImage> > layer_image_stack;
-    QList<bool> layer_skip_stack;
-
     unsigned int command_index = 0;
 
-    const quint32 *commands = &commands_v[0];
+    const quint32 *commands = commands_v->data();
 
     extern QElapsedTimer timer;
     extern qint64 timer_offset_ns;
 
-    while (command_index < commands_v.size())
+    while (command_index < commands_v->size())
     {
         quint32 cmd_hex = read_uint32(commands, command_index);
         quint32 cmd = (cmd_hex & 0x000000FF) << 24 |
@@ -1712,9 +1747,6 @@ RenderedTimeStamps PaintBinaryCommands(QPainter *rawPainter, const std::vector<q
                       (cmd_hex & 0xFF000000) >> 24;
 
         // qint64 start = qint64(timer.nsecsElapsed() / 1.0E3);
-
-        if (layer_skip && cmd != 0x656e6c79 && cmd != 0x62676c79)
-            continue;
 
         switch (cmd)
         {
@@ -2010,58 +2042,39 @@ RenderedTimeStamps PaintBinaryCommands(QPainter *rawPainter, const std::vector<q
                 float arg6 = read_float(commands, command_index) * display_scaling;
                 float arg7 = read_float(commands, command_index) * display_scaling;
 
-                if (image_cache && image_cache->contains(image_id))
+                QImageInterface image;
+
+                QRectF destination_rect(QPointF(arg4, arg5), QSizeF(arg6, arg7));
+                float context_scaling = qMin(context_scaling_x, context_scaling_y);
+                QSize destination_size((destination_rect.size() * context_scaling).toSize());
+                QSize device_destination_size = destination_size * devicePixelRatio;
+
+                QString image_key = QString::number(image_id);
+
+                if (imageMap.contains(image_key))
                 {
-                    (*image_cache)[image_id].used = true;
-                    QImage image = (*image_cache)[image_id].image;
-                    painter->drawImage(QRectF(QPointF(arg4, arg5), QSizeF(arg6, arg7)), image);
+                    Python_ThreadBlock thread_block;
+
+                    // Put the ndarray in image
+                    PyObjectPtr ndarray_py(QVariantToPyObject(imageMap[image_key]));
+                    if (ndarray_py)
+                    {
+                        // scaledImageFromRGBA is slower than using image.scaled.
+                        // image = PythonSupport::instance()->scaledImageFromRGBA(ndarray_py, destination_size);
+                        PythonSupport::instance()->imageFromRGBA(ndarray_py, &image);
+                    }
+                    // std::cout << "Using cached image" << std::endl;
                 }
                 else
+                    qDebug() << "missing " << image_key;
+
+                if (!image.image.isNull())
                 {
-                    // QElapsedTimer timer;
-                    // timer.start();
-
-                    QImageInterface image;
-
-                    QRectF destination_rect(QPointF(arg4, arg5), QSizeF(arg6, arg7));
-                    float context_scaling = qMin(context_scaling_x, context_scaling_y);
-                    QSize destination_size((destination_rect.size() * context_scaling).toSize());
-                    QSize device_destination_size = destination_size * devicePixelRatio;
-
-                    QString image_key = QString::number(image_id);
-
-                    if (imageMap.contains(image_key))
+                    if (device_destination_size.width() < width * 0.75 || device_destination_size.height() < height * 0.75)
                     {
-                        Python_ThreadBlock thread_block;
-
-                        // Put the ndarray in image
-                        PyObjectPtr ndarray_py(QVariantToPyObject(imageMap[image_key]));
-                        if (ndarray_py)
-                        {
-                            // scaledImageFromRGBA is slower than using image.scaled.
-                            // image = PythonSupport::instance()->scaledImageFromRGBA(ndarray_py, destination_size);
-                            PythonSupport::instance()->imageFromRGBA(ndarray_py, &image);
-                        }
-                        // std::cout << "Using cached image" << std::endl;
+                        image.image = image.image.scaled(device_destination_size, Qt::KeepAspectRatio, Qt::SmoothTransformation);
                     }
-                    else
-                        qDebug() << "missing " << image_key;
-
-                    if (!image.image.isNull())
-                    {
-                        if (device_destination_size.width() < width * 0.75 || device_destination_size.height() < height * 0.75)
-                        {
-                            image.image = image.image.scaled(device_destination_size, Qt::KeepAspectRatio, Qt::SmoothTransformation);
-                        }
-                        painter->drawImage(destination_rect, image.image);
-                        if (image_cache)
-                        {
-                            PaintImageCacheEntry cache_entry(image_id, true, image.image);
-                            (*image_cache)[image_id] = cache_entry;
-                        }
-                    }
-
-                    // std::cout << "Elapsed: " << timer.elapsed() << "ms " << width << "x" << height << " ; " << image.width() << "x" << image.height() << " ; " << destination_size.width() << "x" << destination_size.height() << std::endl;
+                    painter->drawImage(destination_rect, image.image);
                 }
 
                 break;
@@ -2085,61 +2098,42 @@ RenderedTimeStamps PaintBinaryCommands(QPainter *rawPainter, const std::vector<q
 
                 int color_map_image_id = read_uint32(commands, command_index);
 
-                if (image_cache && image_cache->contains(image_id))
+                QImageInterface image;
+
+                QRectF destination_rect(QPointF(arg4, arg5), QSizeF(arg6, arg7));
+                float context_scaling = qMin(context_scaling_x, context_scaling_y);
+                QSize destination_size((destination_rect.size()* context_scaling).toSize());
+                QSize device_destination_size = destination_size * devicePixelRatio;
+
+                QString image_key = QString::number(image_id);
+
+                if (imageMap.contains(image_key))
                 {
-                    (*image_cache)[image_id].used = true;
-                    QImage image = (*image_cache)[image_id].image;
-                    painter->drawImage(QRectF(QPointF(arg4, arg5), QSizeF(arg6, arg7)), image);
-                }
-                else
-                {
-//                    QTime timer;
-//                    timer.start();
+                    Python_ThreadBlock thread_block;
 
-                    QImageInterface image;
-
-                    QRectF destination_rect(QPointF(arg4, arg5), QSizeF(arg6, arg7));
-                    float context_scaling = qMin(context_scaling_x, context_scaling_y);
-                    QSize destination_size((destination_rect.size()* context_scaling).toSize());
-                    QSize device_destination_size = destination_size * devicePixelRatio;
-
-                    QString image_key = QString::number(image_id);
-
-                    if (imageMap.contains(image_key))
+                    // Put the ndarray in image
+                    PyObjectPtr ndarray_py(QVariantToPyObject(imageMap[image_key]));
+                    if (ndarray_py)
                     {
-                        Python_ThreadBlock thread_block;
+                        PyObject *colormap_ndarray_py = NULL;
 
-                        // Put the ndarray in image
-                        PyObjectPtr ndarray_py(QVariantToPyObject(imageMap[image_key]));
-                        if (ndarray_py)
+                        if (color_map_image_id != 0)
                         {
-                            PyObject *colormap_ndarray_py = NULL;
-
-                            if (color_map_image_id != 0)
-                            {
-                                QString color_map_image_key = QString::number(color_map_image_id);
-                                if (imageMap.contains(color_map_image_key))
-                                    colormap_ndarray_py = (PyObject *)QVariantToPyObject(imageMap[color_map_image_key]);
-                            }
+                            QString color_map_image_key = QString::number(color_map_image_id);
+                            if (imageMap.contains(color_map_image_key))
+                                colormap_ndarray_py = (PyObject *)QVariantToPyObject(imageMap[color_map_image_key]);
+                        }
 
 //                          PythonSupport::instance()->imageFromArray(ndarray_py, low, high, colormap_ndarray_py, &image);
-                            PythonSupport::instance()->scaledImageFromArray(ndarray_py, device_destination_size.width(), device_destination_size.height(), context_scaling, low, high, colormap_ndarray_py, &image);
-                        }
+                        PythonSupport::instance()->scaledImageFromArray(ndarray_py, device_destination_size.width(), device_destination_size.height(), context_scaling, low, high, colormap_ndarray_py, &image);
                     }
-                    else
-                        qDebug() << "missing " << image_key;
+                }
+                else
+                    qDebug() << "missing " << image_key;
 
-                    if (!image.image.isNull())
-                    {
-                        painter->drawImage(destination_rect, image.image);
-                        if (image_cache)
-                        {
-                            PaintImageCacheEntry cache_entry(image_id, true, image.image);
-                            (*image_cache)[image_id] = cache_entry;
-                        }
-                    }
-
-//                    qDebug() << "Elapsed: " << timer.elapsed() << "ms " << width << "x" << height << " ; " << image.width() << "x" << image.height() << " ; " << int(destination_rect.width() * context_scaling) << "x" << int(destination_rect.height() * context_scaling);
+                if (!image.image.isNull())
+                {
+                    painter->drawImage(destination_rect, image.image);
                 }
                 break;
             }
@@ -2338,95 +2332,27 @@ RenderedTimeStamps PaintBinaryCommands(QPainter *rawPainter, const std::vector<q
             case 0x74696d65: // time, message
             {
                 QString text = read_string(commands, command_index);
-                QDateTime date_time = QDateTime::fromString(text, Qt::ISODateWithMs);
-                painter->save();
-                date_time.setTimeSpec(Qt::UTC);
-                QPointF text_pos(12, 12);
-                QFont text_font = QFontDatabase::systemFont(QFontDatabase::FixedFont);
-                QFontMetrics fm(text_font);
-                int text_width = fm.horizontalAdvance(text);
-                int text_ascent = fm.ascent();
-                int text_height = fm.height();
-                QPainterPath background;
-                background.addRect(text_pos.x() - 4, text_pos.y() - 4, text_width + 8, text_height + 8);
-                painter->fillPath(background, Qt::white);
-                QPainterPath path;
-                path.addText(text_pos.x(), text_pos.y() + text_ascent, text_font, text);
-                painter->fillPath(path, Qt::black);
-                painter->restore();
-                QTransform transform = painter->transform();
-                QList<QSharedPointer<QPainter> > painter_stack_reversed = painter_stack;
-                std::reverse(painter_stack.begin(), painter_stack.end());
-                Q_FOREACH(QSharedPointer<QPainter> p, painter_stack_reversed)
-                    transform = QTransform::fromScale(1/transform_scaling, 1/transform_scaling) * p->transform() * transform;
-                rendered_timestamps.append(RenderedTimeStamp(transform, date_time, section_id));
-                break;
-            }
-            case 0x62676c79: // begin layer
-            {
-                quint32 layer_id = read_uint32(commands, command_index);
-                quint32 layer_seed = read_uint32(commands, command_index);
-                float layer_rect_top = read_float(commands, command_index) * display_scaling;
-                float layer_rect_left = read_float(commands, command_index) * display_scaling;
-                float layer_rect_height = read_float(commands, command_index) * display_scaling;
-                float layer_rect_width = read_float(commands, command_index) * display_scaling;
-                QRect layer_rect((int)layer_rect_left, (int)layer_rect_top, (int)layer_rect_width, (int)layer_rect_height);
-                layer_skip_stack.push_back(layer_skip);
-                if (!layer_skip)
+                int64_t timestamp_ns = 0;
+                int64_t elapsed_ns = 0;
+                if (text.length() > 4)
                 {
-                    if (layer_cache->contains(layer_id) && layer_seed == layer_cache->value(layer_id).layer_seed)
+                    // calculate new date time
+                    timestamp_ns = text.toULongLong();
+                }
+                else
+                {
+                    // use existing date time, elapsedDuration
+                    for (const auto &rendered_timestamp : lastRenderedTimestamps)
                     {
-                        layer_skip = true;
-                    }
-                    else
-                    {
-                        painter_stack.push_back(painter);
-                        layer_image_stack.push_back(layer_image);
-                        // create the layer image at a resolution suitable for the devicePixelRatio of the section's screen.
-                        layer_image = QSharedPointer<QImage>(new QImage(QSize(layer_rect.width() * devicePixelRatio, layer_rect.height() * devicePixelRatio), QImage::Format_ARGB32_Premultiplied));
-                        layer_image->fill(QColor(0,0,0,0));
-                        painter = QSharedPointer<QPainter>(new QPainter(layer_image.data()));
-                        painter->setRenderHints(DEFAULT_RENDER_HINTS);
-                        // draw everything at the higher scale of the section's screen.
-                        painter->scale(devicePixelRatio, devicePixelRatio);
-                        // track the transform scaling
-                        transform_scaling *= devicePixelRatio;
-                        painter->translate(layer_rect_left, layer_rect_top);
+                        if (rendered_timestamp.section_id == section_id)
+                        {
+                            timestamp_ns = rendered_timestamp.timestamp_ns;
+                            elapsed_ns = rendered_timestamp.elapsed_ns;
+                            text = rendered_timestamp.text;
+                        }
                     }
                 }
-                layers_used.insert(layer_id);
-                break;
-            }
-            case 0x656e6c79: // end layer
-            {
-                quint32 layer_id = read_uint32(commands, command_index);
-                quint32 layer_seed = read_uint32(commands, command_index);
-                float layer_rect_top = read_float(commands, command_index) * display_scaling;
-                float layer_rect_left = read_float(commands, command_index) * display_scaling;
-                float layer_rect_height = read_float(commands, command_index) * display_scaling;
-                float layer_rect_width = read_float(commands, command_index) * display_scaling;
-                QRect layer_rect((int)layer_rect_left, (int)layer_rect_top, (int)layer_rect_width, (int)layer_rect_height);
-                layer_skip = layer_skip_stack.takeLast();
-                if (!layer_skip)
-                {
-                    if (layer_cache->contains(layer_id) && layer_seed == layer_cache->value(layer_id).layer_seed)
-                    {
-                        layer_skip = false;
-                        QSharedPointer<QImage> layer_image = layer_cache->value(layer_id).layer_image;
-                        layer_rect = layer_cache->value(layer_id).layer_rect;
-                        painter->drawImage(layer_rect, *layer_image);
-                    }
-                    else
-                    {
-                        painter->end();
-                        layer_cache->insert(layer_id, LayerCacheEntry(layer_seed, layer_image, layer_rect));
-                        painter = painter_stack.takeLast();
-                        painter->drawImage(layer_rect, *layer_image);
-                        layer_image = layer_image_stack.takeLast();
-                        // track the transform scaling
-                        transform_scaling /= devicePixelRatio;
-                    }
-                }
+                rendered_timestamps.append(RenderedTimeStamp(painter->transform(), timestamp_ns, section_id, elapsed_ns, text));
                 break;
             }
         }
@@ -2436,74 +2362,165 @@ RenderedTimeStamps PaintBinaryCommands(QPainter *rawPainter, const std::vector<q
         //     qDebug() << "cmd " << QString::number(cmd, 16) << " " << (end - start);
     }
 
-    if (image_cache)
-    {
-        Q_FOREACH(int image_id, image_cache->keys())
-        {
-            if (!image_cache->value(image_id).used)
-            {
-                image_cache->remove(image_id);
-            }
-        }
-    }
-
-    if (layer_cache)
-    {
-        Q_FOREACH(int layer_id, layer_cache->keys())
-        {
-            if (!layers_used.contains(layer_id))
-            {
-                layer_cache->take(layer_id);
-            }
-        }
-    }
-
     return rendered_timestamps;
 }
 
-PyCanvasRenderTask::PyCanvasRenderTask(PyCanvas *canvas)
+PyCanvasRenderTask::PyCanvasRenderTask(PyCanvas *canvas, const CanvasSectionSharedPtr &section, const DrawingCommandsSharedPtr &drawing_commands, float devicePixelRatio, const RenderedTimeStamps &rendered_timestamps)
     : m_canvas(canvas)
-    , m_signals(new PyCanvasRenderTaskSignals())
+    , m_section(section)
+    , m_drawing_commands(drawing_commands)
+    , m_device_pixel_ratio(devicePixelRatio)
+    , m_rendered_timestamps(rendered_timestamps)
 {
-}
-
-PyCanvasRenderTask::~PyCanvasRenderTask()
-{
-    delete m_signals;
+    // NOTE: this class is a QRunnable and auto deletes when the run() method completes.
 }
 
 void PyCanvasRenderTask::run()
 {
-    QRectOptional repaint_rect = m_canvas->renderOne();
-    if (repaint_rect.has_value)
-        Q_EMIT m_signals->renderingReady(repaint_rect.value);
+    RenderResult render_result(m_section);
+
+    auto const commands = m_drawing_commands->commands();
+    auto const rect = m_drawing_commands->rect();
+    auto const image_map = m_drawing_commands->imageMap();
+
+    if (commands && !commands->empty() && !rect.isEmpty())
+    {
+        // create the buffer image at a resolution suitable for the devicePixelRatio of the section's screen.
+        QSharedPointer<QImage> image = QSharedPointer<QImage>(new QImage(QSize(rect.width() * m_device_pixel_ratio, rect.height() * m_device_pixel_ratio), QImage::Format_ARGB32_Premultiplied));
+        image->fill(QColor(0,0,0,0));
+        QPainter painter(image.data());
+        painter.setRenderHints(DEFAULT_RENDER_HINTS);
+        // draw everything at the higher scale of the section's screen.
+        painter.scale(m_device_pixel_ratio, m_device_pixel_ratio);
+        auto new_rendered_timestamps = PaintBinaryCommands(&painter, commands, image_map, m_rendered_timestamps, 0.0, m_section->m_section_id, m_device_pixel_ratio);
+        painter.end();  // ending painter here speeds up QImage assignment below (Windows)
+        render_result.image = image;
+        render_result.image_rect = rect;
+        for (auto const &r : new_rendered_timestamps)
+        {
+            QTransform transform = r.transform;
+            transform.translate(rect.left(), rect.top());
+            transform = transform * QTransform::fromScale(1/m_device_pixel_ratio, 1/m_device_pixel_ratio);
+            render_result.rendered_timestamps.append(RenderedTimeStamp(transform, r.timestamp_ns, r.section_id));
+        }
+        render_result.record_latency = true;
+    }
+
+    m_canvas->continuePaintingSection(render_result);
 }
+
+CanvasSection::CanvasSection(int section_id, float device_pixel_ratio)
+    : m_section_id(section_id)
+    , m_device_pixel_ratio(device_pixel_ratio)
+    , record_latency(false)
+    , m_render_task(nullptr)
+{
+    // m_render_task auto deletes after its run method finishes, so it should not be in a scoped or shared pointer.
+}
+
+/*
+ The canvas widget renders low-level drawing commnds in a thread and paints the resulting bitmap.
+
+ The drawing can optionally be split into sections which are rendered in a specific rectangle of the canvas.
+ The drawing commands for each section can be submitted independently and will each render to a bitmap on
+ its own thread. The resulting bitmaps can be painted from the main thread very quickly, preserving performance.
+
+ The client submits drawing commands for each section on a thread. This triggers a rendering thread for the
+ section if one is not already running, otherwise the commands are stored as pending for future rendering.
+ All sections can render simultaneously with other sections, but each section only renders one version of
+ itself at any time. Rendering for a specific section is automatically relaunched on a new thread if there
+ are pending drawing commands received during an existing rendering. If multiple drawing commands are submitted
+ during rendering, only the latest one is used as the pending drawing commands.
+
+ When a section has finished rendering, it requests the document window to update the section's canvas item.
+ The request is thread safe and does not block. The next rendering pass for the section can begin immediately.
+ The document window checks periodically for update requests in timerEvent on the main thread. If it sees a
+ request, it calls update on the target canvas item in order to trigger a paint event. If multiple sections
+ request updates in between paint events, update will only be called once per canvas item. The paint event
+ draws all sections. Calling update or receiving a paint event is always done on the main thread. For best
+ performance, the paint event must run quickly and update must not be called too often, otherwise Qt will try
+ to gather up repaint events by delaying them.
+
+ To achieve high performance, locking is minimized (see m_sections_mutex). The lock is held in the destructor
+ for synchronization, when updating the section with the bitmap after it has been rendered on its
+ thread (continuePaintingSection), during painting (paintEvent), and when updating the commands to trigger
+ rendering on a thread (setBinarySectionCommands).
+ */
 
 PyCanvas::PyCanvas()
     : m_pressed(false)
     , m_grab_mouse_count(0)
-    , m_rendering_count(0)
 {
     setMouseTracking(true);
     setAcceptDrops(true);
-
-    m_timer.start();
 }
 
 PyCanvas::~PyCanvas()
 {
-    QMutexLocker locker(&m_rendering_count_mutex);
-    while (m_rendering_count > 0)
+    // cancel any outstanding requests before shutting down the thread.
+    repaintManager.cancelRepaintRequest(this);
+    // now shut down the rendering thread by waiting until not rendering.
+    QMutexLocker locker(&m_sections_mutex);
+    while (true)
     {
-        m_rendering_count_mutex.unlock();
+        bool is_rendering = false;
+        Q_FOREACH(CanvasSectionSharedPtr section, m_sections)
+        {
+            if (section->m_render_task)
+            {
+                is_rendering = true;
+                break;
+            }
+        }
+        if (!is_rendering)
+            break;
+        m_sections_mutex.unlock();
         QThread::msleep(1);
-        m_rendering_count_mutex.lock();
+        m_sections_mutex.lock();
     }
+    // and once again cancel outstanding requests that might have been added
+    // during thread shutdown.
+    repaintManager.cancelRepaintRequest(this);
 }
 
-void PyCanvas::repaintRect(const QRect &repaintRect)
+/*
+ Continue painting the section and rendering in the render result.
+
+ The render result will be created on a thread and this function will be called by the thread.
+ Its main task is to safely transfer the resulting bitmap (image, image_rect) to the section,
+ notify the window that the canvas item needs an update, and then launch another render task if
+ needed, determined by whether m_pending_drawing_commands is non-empty. The resulting bitmap
+ will be painted during a subsequent paint event.
+ */
+void PyCanvas::continuePaintingSection(const RenderResult &render_result)
 {
-    update(repaintRect);
+    PyCanvasRenderTask *task = nullptr;
+
+    {
+        QMutexLocker locker(&m_sections_mutex);
+        auto section = render_result.section;
+        // m_render_task is used to determine if the rendering thread is running, so clear it here.
+        // the render task will be auto deleted after its run method finishes, and since this method
+        // is being called from the run method, deleting the m_render_task here would be an error and
+        // lead to crashes.
+        section->m_render_task = nullptr;
+        section->m_rendered_timestamps = render_result.rendered_timestamps;
+        section->image = render_result.image;
+        section->image_rect = render_result.image_rect;
+        section->record_latency = render_result.record_latency;
+        auto pending_commands = section->m_pending_drawing_commands;
+        section->m_pending_drawing_commands.reset();
+        if (pending_commands)
+        {
+            task = new PyCanvasRenderTask(this, section, pending_commands, section->m_device_pixel_ratio, section->m_rendered_timestamps);
+            section->m_render_task = task;
+        }
+        repaintManager.requestRepaint(window(), this);
+    }
+
+    // launch the task outside of the mutex.
+    if (task)
+        QThreadPool::globalInstance()->start(task);
 }
 
 void PyCanvas::focusInEvent(QFocusEvent *event)
@@ -2532,207 +2549,202 @@ void PyCanvas::focusOutEvent(QFocusEvent *event)
     QWidget::focusOutEvent(event);
 }
 
-class RenderCounter
+int64_t GetCurrentTime()
 {
-    QMutex *m;
-    int &rendering_count;
-public:
-    RenderCounter(QMutex *m, int &rendering_count) : m(m), rendering_count(rendering_count)
+#if defined(__APPLE__)
+    return clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
+#endif
+#if defined(_WIN32) || defined(_WIN64)
+    auto current_time_point = std::chrono::high_resolution_clock::now();
+    return current_time_point.time_since_epoch().count();
+#endif
+#if defined(__linux__)
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return static_cast<int64_t>(ts.tv_nsec);
+#endif
+}
+
+template<typename T>
+struct Measurements
+{
+    Measurements(const QQueue<T> &values_in)
+        : minimum(std::numeric_limits<T>::max())
+        , maximum(std::numeric_limits<T>::min())
+        , average(0.0)
+        , std_dev(0.0)
     {
-        QMutexLocker locker(m);
-        rendering_count += 1;
+        auto values = values_in;
+        std::sort(values.begin(), values.end());
+        int discard = values.size() / 10;
+        while (discard > 0)
+        {
+            if (discard > 0 && values.size())
+            {
+                values.pop_front();
+                discard -= 1;
+            }
+            if (discard > 0 && values.size())
+            {
+                values.pop_back();
+                discard -= 1;
+            }
+        }
+        for (auto value : values)
+        {
+            average += value;
+            if (value < minimum)
+                minimum = value;
+            if (value > maximum)
+                maximum = value;
+        }
+        average = average / values.size();
+        double sum_squares = 0;
+        for (auto value : values)
+        {
+            sum_squares += (value - average) * (value - average);
+            value_string_list += " " + QString::number(qRound(value / 1e6));
+        }
+        std_dev = sqrt(sum_squares / values.size());
     }
-    ~RenderCounter()
+
+    T minimum;
+    T maximum;
+    double average;
+    double std_dev;
+    QString value_string_list;
+
+    QString text() const
     {
-        QMutexLocker locker(m);
-        rendering_count -= 1;
+        if (average > 0)
+            return " " + QString::number(qRound(average / 1e6)).rightJustified(3) + " ± " + QString::number(std_dev / 1e6, 'f', 1).rightJustified(4) + " [" + QString::number(qRound(minimum / 1e6)).rightJustified(3) + ":" + QString::number(qRound(maximum / 1e6)).rightJustified(3) + " ] ";
+        return QString();
+    }
+
+    QString textF() const
+    {
+        if (average > 0.0)
+            return " " + QString::number(average, 'f', 1).rightJustified(3) + " ± " + QString::number(std_dev, 'f', 1).rightJustified(4) + " [" + QString::number(minimum, 'f', 1).rightJustified(3) + ":" + QString::number(maximum, 'f', 1).rightJustified(3) + " ] ";
+        return QString();
     }
 };
 
-QRectOptional PyCanvas::renderOne()
+struct ImageAndRect
 {
-    RenderCounter render_counter(&m_rendering_count_mutex, m_rendering_count);
+    QSharedPointer<QImage> image;
+    QRect image_rect;
 
-    QList<QSharedPointer<CanvasSection> > sections;
+    ImageAndRect(QSharedPointer<QImage> image, const QRect &image_rect) : image(image), image_rect(image_rect) { }
+};
 
-    {
-        QMutexLocker locker(&m_commands_mutex);
-        sections = m_sections.values();
-    }
-
-    QSharedPointer<CanvasSection> nextSection;
-    Q_FOREACH(QSharedPointer<CanvasSection> section, sections)
-    {
-        QMutexLocker locker(&section->m_mutex);
-        // first check whether the section can be rendered (not rendering already and has commands to render)
-        if (!section->rendering && !section->m_commands_binary.empty())
-        {
-            // next check whether it is earlier than the current next_section
-            // if so, make this the new next section
-            if (!nextSection || section->time < nextSection->time)
-                nextSection = section;
-        }
-    }
-
-    if (nextSection)
-    {
-        {
-            QMutexLocker locker(&nextSection->m_mutex);
-            // mark this section as being rendered, but check to make sure it's not being rendered
-            // on another thread (avoids race condition). also check to see if it was deleted.
-            if (!nextSection->rendering && !nextSection->m_commands_binary.empty())
-                nextSection->rendering = true;
-            else
-                return QRectOptional();
-        }
-        QRectOptional rect_optional = renderSection(nextSection);
-        {
-            QMutexLocker locker(&nextSection->m_mutex);
-            // mark this section as being finished. no race condition. just clear it and update the time.
-            nextSection->rendering = false;
-            nextSection->time = m_timer.nsecsElapsed();
-        }
-        wakeRenderer();
-        return rect_optional;
-    }
-
-    return QRectOptional();
-}
-
-QRectOptional PyCanvas::renderSection(QSharedPointer<CanvasSection> section)
+struct DrawnText
 {
-    std::vector<quint32> commands_binary;
-    QRect rect;
-    QMap<QString, QVariant> imageMap;
-    int section_id;
-    {
-        QMutexLocker locker(&section->m_mutex);
-        commands_binary = section->m_commands_binary;
-        rect = section->rect;
-        imageMap = section->m_imageMap;
-        section_id = section->m_section_id;
-        section->m_commands_binary.clear();
-    }
-    if (!commands_binary.empty() && !rect.isEmpty())
-    {
-        float devicePixelRatio = section->m_device_pixel_ratio;
-        // create the buffer image at a resolution suitable for the devicePixelRatio of the section's screen.
-        QSharedPointer<QImage> image = QSharedPointer<QImage>(new QImage(QSize(rect.width() * devicePixelRatio, rect.height() * devicePixelRatio), QImage::Format_ARGB32_Premultiplied));
-        image->fill(QColor(0,0,0,0));
-        QPainter painter(image.data());
-        painter.setRenderHints(DEFAULT_RENDER_HINTS);
-        // draw everything at the higher scale of the section's screen.
-        painter.scale(devicePixelRatio, devicePixelRatio);
-        RenderedTimeStamps rendered_timestamps = PaintBinaryCommands(&painter, commands_binary, imageMap, &section->m_image_cache, &section->m_layer_cache, 0.0, section_id, devicePixelRatio);
-        painter.end();  // ending painter here speeds up QImage assignment below (Windows)
+    QString text;
+    int line;
+    QTransform world_transform;
 
-        QMutexLocker locker(&section->m_mutex);
-        section->image = image;
-        section->image_rect = rect;
-        section->m_rendered_timestamps.clear();
-        Q_FOREACH(RenderedTimeStamp r, rendered_timestamps)
-        {
-            QTransform transform = r.transform;
-            transform.translate(rect.left(), rect.top());
-            transform = transform * QTransform::fromScale(1/devicePixelRatio, 1/devicePixelRatio);
-            section->m_rendered_timestamps.append(RenderedTimeStamp(transform, r.dateTime, r.section_id));
-        }
-        return QRectOptional(rect);
-    }
-    return QRectOptional();
-}
+    DrawnText(const QString &text, int line, const QTransform &transform) : text(text), line(line), world_transform(transform) { }
+};
 
+/*
+ Paint the canvas item.
+
+ Iterates through the sections and draws the bitmap associated with the section. Also handles the display
+ of frame rate and latency. This method should block minimally and run fast since it affects overall
+ responsiveness of the user interface.
+ */
 void PyCanvas::paintEvent(QPaintEvent *event)
 {
     Q_UNUSED(event)
 
-    QPainter painter;
-
-    painter.begin(this);
-
-    QList<QSharedPointer<CanvasSection> > sections;
-
-    {
-        QMutexLocker locker(&m_commands_mutex);
-        sections = m_sections.values();
-    }
+    std::list<ImageAndRect> imageAndRects;
+    std::list<DrawnText> drawnTexts;
 
     RenderedTimeStamps rendered_timestamps;
 
-    Q_FOREACH(QSharedPointer<CanvasSection> section, sections)
     {
-        QSharedPointer<QImage> image;
-        QRect image_rect;
+        QMutexLocker locker(&m_sections_mutex);
+
+        auto current_time_ns = GetCurrentTime();
+
+        for (auto const &section : m_sections)
         {
-            QMutexLocker locker(&section->m_mutex);
-            image = section->image;
-            image_rect = section->image_rect;
+            if (section->image && !section->image->isNull() && section->image_rect.intersects(event->rect()))
+                imageAndRects.push_back(ImageAndRect(section->image, section->image_rect));
+
+            for (auto &rendered_timestamp : section->m_rendered_timestamps)
+            {
+                if (!rendered_timestamp.elapsed_ns)
+                {
+                    rendered_timestamp.elapsed_ns = current_time_ns - rendered_timestamp.timestamp_ns;
+                }
+            }
             rendered_timestamps.append(section->m_rendered_timestamps);
         }
-        // qDebug() << "paintEvent " << image->isNull() << " " << image_rect << " " << event->rect();
-        if (image && !image->isNull() && image_rect.intersects(event->rect()))
+
+        for (auto const &rendered_timestamp : rendered_timestamps)
         {
-            // qDebug() << "draw " << image_rect.topLeft();
-            painter.drawImage(image_rect, *image);
+            if (rendered_timestamp.section_id > 0)
+            {
+                auto section = m_sections[rendered_timestamp.section_id];
+                if (section->record_latency)
+                {
+                    section->latencies_ns.enqueue(rendered_timestamp.elapsed_ns);
+                    while (section->latencies_ns.size() > 40)
+                        section->latencies_ns.dequeue();
+                    section->timestamps_ns.enqueue(rendered_timestamp.timestamp_ns);
+                    while (section->timestamps_ns.size() > 40)
+                        section->timestamps_ns.dequeue();
+                    section->record_latency = false;
+                }
+                QQueue<double> frame_rates;
+                auto timestamps_ns(section->timestamps_ns);
+                if (timestamps_ns.size() > 1)
+                {
+                    for (auto i = 0; i < timestamps_ns.size() - 1; ++i)
+                    {
+                        auto delta_ns = timestamps_ns[i+1] - timestamps_ns[i];
+                        if (delta_ns > 0.0)
+                        {
+                            double frame_rate = 1.0e9 / delta_ns;
+                            frame_rates.push_back(frame_rate);
+                        }
+                    }
+                }
+                Measurements latencies_measurement(section->latencies_ns);
+                Measurements frame_rates_measurement(frame_rates);
+                QString latency_text = "Latency " + QString::number(static_cast<int>(qRound(rendered_timestamp.elapsed_ns / 1e6))).rightJustified(4) + latencies_measurement.text();
+                QString frame_rate_text = "Frame Rate" + frame_rates_measurement.textF();
+                drawnTexts.push_back(DrawnText(frame_rate_text, 0, rendered_timestamp.transform));
+                drawnTexts.push_back(DrawnText(latency_text, 1, rendered_timestamp.transform));
+            }
         }
     }
 
-    QDateTime utc = QDateTime::currentDateTimeUtc();
+    QPainter painter;
+    painter.begin(this);
 
-    Q_FOREACH(const RenderedTimeStamp &rendered_timestamp, rendered_timestamps)
+    for (auto const &imageAndRect : imageAndRects)
+    {
+        painter.drawImage(imageAndRect.image_rect, *imageAndRect.image);
+    }
+
+    for (auto const &drawnText : drawnTexts)
     {
         painter.save();
         painter.setRenderHints(DEFAULT_RENDER_HINTS);
-        QDateTime dt = rendered_timestamp.dateTime;
-        qint64 millisecondsDiff = dt.msecsTo(utc);
-        qint64 latencyMin = 1000;
-        qint64 latencyAverage = 0;
-        qint64 latencyMax = 0;
-        double latencyStdDev = 0;
-        if (rendered_timestamp.section_id > 0)
-        {
-            QSharedPointer<CanvasSection> section;
-            {
-                QMutexLocker locker(&m_commands_mutex);
-                section = m_sections[rendered_timestamp.section_id];
-            }
-            QMutexLocker locker(&section->latenciesMutex);
-            section->latencies.enqueue(millisecondsDiff);
-            if (section->latencies.size() > 100)
-                section->latencies.dequeue();
-            Q_FOREACH(quint64 latency, section->latencies)
-            {
-                latencyAverage += latency;
-                if (latency < latencyMin)
-                    latencyMin = latency;
-                if (latency > latencyMax)
-                    latencyMax = latency;
-            }
-            double latencyAverageF = (double)latencyAverage / section->latencies.size();
-            latencyAverage = (qint64)latencyAverageF;
-            double sumSquares = 0;
-            Q_FOREACH(quint64 latency, section->latencies)
-            {
-                sumSquares += (latency - latencyAverageF) * (latency - latencyAverageF);
-            }
-            latencyStdDev = sqrt(sumSquares / section->latencies.size() );
-        }
-        QString text = "Latency " + QString::number(millisecondsDiff).rightJustified(4);
-        if (latencyAverage > 0)
-            text += ":" + QString::number(latencyAverage).rightJustified(3) + " ± " + QString::number(latencyStdDev, 'f', 1).rightJustified(4) + " [" + QString::number(latencyMin).rightJustified(3) + ":" + QString::number(latencyMax).rightJustified(3) + " ]";
         QFont text_font = QFontDatabase::systemFont(QFontDatabase::FixedFont);
         QFontMetrics fm(text_font);
-        int text_width = fm.horizontalAdvance(text);
+        int text_width = fm.horizontalAdvance(drawnText.text);
         int text_ascent = fm.ascent();
         int text_height = fm.height();
-        QPointF text_pos(12, 12 + text_height + 16);
-        QTransform world_transform = rendered_timestamp.transform;
-        painter.setWorldTransform(world_transform);
+        QPointF text_pos(12, text_height + ((text_height + 12) * drawnText.line));
+        painter.setWorldTransform(drawnText.world_transform);
         QPainterPath background;
         background.addRect(text_pos.x() - 4, text_pos.y() - 4, text_width + 8, text_height + 8);
         painter.fillPath(background, Qt::white);
         QPainterPath path;
-        path.addText(text_pos.x(), text_pos.y() + text_ascent, text_font, text);
+        path.addText(text_pos.x(), text_pos.y() + text_ascent, text_font, drawnText.text);
         painter.fillPath(path, Qt::black);
         painter.restore();
     }
@@ -2966,72 +2978,63 @@ void PyCanvas::releaseMouse0()
     }
 }
 
-void PyCanvas::renderingFinished()
-{
-    QTimer::singleShot(0, this, SLOT(update()));
-}
-
 void PyCanvas::setCommands(const QList<CanvasDrawingCommand> &commands)
 {
-    {
-        QMutexLocker locker(&m_commands_mutex);
-        m_commands = commands;
-    }
-
-    wakeRenderer();
+    // deprecated.
 }
 
-void PyCanvas::setBinaryCommands(const std::vector<quint32> &commands, const QMap<QString, QVariant> &imageMap)
-{
-    setBinarySectionCommands(0, commands, rect(), imageMap);
-}
+/*
+ Update the drawing commands for the given section.
 
-void PyCanvas::setBinarySectionCommands(int section_id, const std::vector<quint32> &commands, const QRect &rect, const QMap<QString, QVariant> &imageMap)
+ Section zero is used when not using individual sections.
+
+ Creates a new section if needed. Then either starts a new rendering task or stores the commands as pending.
+ */
+void PyCanvas::setBinarySectionCommands(int section_id, const DrawingCommandsSharedPtr &drawing_commands)
 {
-    QSharedPointer<CanvasSection> section;
+    // ensure the original gets released outside of the lock by assigning it to this variable.
+    DrawingCommandsSharedPtr pending_drawing_commands;
+
+    PyCanvasRenderTask *task = nullptr;
 
     {
-        QMutexLocker locker(&m_commands_mutex);
+        QMutexLocker locker(&m_sections_mutex);
+
+        CanvasSectionSharedPtr section;
+
         if (m_sections.contains(section_id))
         {
             section = m_sections[section_id];
         }
         else
         {
-            QSharedPointer<CanvasSection> new_section(new CanvasSection());
-            m_sections[section_id] = new_section;
-            section = new_section;
             auto screen = this->screen();
-            section->m_device_pixel_ratio = screen ? screen->devicePixelRatio() : 1.0;  // m_screen may be nullptr in earlier versions of Qt
-            section->m_section_id = section_id;
-            section->rendering = false;
-            section->time = 0;
+            auto device_pixel_ratio = screen ? screen->devicePixelRatio() : 1.0;  // m_screen may be nullptr in earlier versions of Qt
+            section.reset(new CanvasSection(section_id, device_pixel_ratio));
+            m_sections[section_id] = section;
+        }
+
+        pending_drawing_commands = section->m_pending_drawing_commands;
+
+        if (!section->m_render_task)
+        {
+            task = new PyCanvasRenderTask(this, section, drawing_commands, section->m_device_pixel_ratio, section->m_rendered_timestamps);
+            section->m_render_task = task;
+        }
+        else
+        {
+            section->m_pending_drawing_commands = drawing_commands;
         }
     }
 
-    QMap<QString, QVariant> imageMapCopy;
-
-    {
-        QMutexLocker locker(&section->m_mutex);
-        section->m_commands_binary = commands;
-        imageMapCopy = section->m_imageMap;  // ensure the original gets released outside of the lock
-        section->rect = rect;
-        section->m_imageMap = imageMap;
-    }
-
-    wakeRenderer();
-}
-
-void PyCanvas::wakeRenderer()
-{
-    PyCanvasRenderTask *task = new PyCanvasRenderTask(this);
-    connect(task->signals(), SIGNAL(renderingReady(const QRect &)), this, SLOT(repaintRect(const QRect &)));
-    QThreadPool::globalInstance()->start(task);
+    // launch the task outside of the mutex.
+    if (task)
+        QThreadPool::globalInstance()->start(task);
 }
 
 void PyCanvas::removeSection(int section_id)
 {
-    QMutexLocker locker(&m_commands_mutex);
+    QMutexLocker locker(&m_sections_mutex);
     m_sections.remove(section_id);
 }
 
@@ -4018,7 +4021,7 @@ PyDrawingContext::PyDrawingContext(QPainter *painter)
 
 void PyDrawingContext::paintCommands(const QList<CanvasDrawingCommand> &commands)
 {
-    PaintCommands(*m_painter, commands, &m_image_cache);
+    PaintCommands(*m_painter, commands);
 }
 
 // -----------------------------------------------------------

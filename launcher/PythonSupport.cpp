@@ -1,5 +1,5 @@
 /*
- Copyright (c) 2012-2015 Nion Company.
+ Copyright (c) 2012-2024 Bruker, Inc.
 */
 
 #include <stdint.h>
@@ -35,59 +35,6 @@
 
 #include "Image.h"
 #include "FileSystem.h"
-
-#define NPY_NO_DEPRECATED_API NPY_1_19_API_VERSION
-#define PY_ARRAY_UNIQUE_SYMBOL d2af2aa3297e
-
-#pragma push_macro("_DEBUG")
-#undef _DEBUG
-
-// numpy uses these functions, so to allow linking to occur
-// override them here and redefine them with the dynamic
-// python versions.
-#pragma push_macro("PyCapsule_CheckExact")
-#pragma push_macro("PyCapsule_GetPointer")
-#pragma push_macro("PyErr_Format")
-#pragma push_macro("PyErr_Print")
-#pragma push_macro("PyErr_SetString")
-#pragma push_macro("PyExc_AttributeError")
-#pragma push_macro("PyExc_ImportError")
-#pragma push_macro("PyExc_RuntimeError")
-#pragma push_macro("PyImport_ImportModule")
-#pragma push_macro("PyObject_HasAttrString")
-#pragma push_macro("PyObject_GetAttrString")
-
-#undef PyCapsule_CheckExact
-#define PyCapsule_CheckExact DPyCapsule_CheckExact
-#define PyCapsule_GetPointer DPyCapsule_GetPointer
-#define PyErr_Format DPyErr_Format
-#define PyErr_Print DPyErr_Print
-#define PyErr_SetString DPyErr_SetString
-#define PyExc_AttributeError DPyExc_GetAttributeError()
-#define PyExc_ImportError DPyExc_GetImportError()
-#define PyExc_RuntimeError DPyExc_GetRuntimeError()
-#define PyImport_ImportModule DPyImport_ImportModule
-#define PyObject_GetAttrString DPyObject_GetAttrString
-#define PyObject_HasAttrString DPyObject_HasAttrString
-
-#include "numpy/arrayobject.h"
-#include "structmember.h"
-
-static void* init_numpy() {
-    import_array();
-    return NULL;
-}
-
-#pragma pop_macro("PyCapsule_CheckExact")
-#pragma pop_macro("PyCapsule_GetPointer")
-#pragma pop_macro("PyErr_Format")
-#pragma pop_macro("PyErr_Print")
-#pragma pop_macro("PyErr_SetString")
-#pragma pop_macro("PyExc_AttributeError")
-#pragma pop_macro("PyExc_ImportError")
-#pragma pop_macro("PyExc_RuntimeError")
-
-#pragma pop_macro("_DEBUG")
 
 #if OS_WINDOWS
 #include <Windows.h>
@@ -181,10 +128,9 @@ public:
         directories.push_back(fs->absoluteFilePath(home_bin_path, "/usr/local/Cellar/python@" + version));
 
         std::list<std::string> variants;
+        variants.push_back("libpython3.13.dylib");
         variants.push_back("libpython3.12.dylib");
         variants.push_back("libpython3.11.dylib");
-        variants.push_back("libpython3.10.dylib");
-        variants.push_back("libpython3.9.dylib");
 
         for (auto directory: directories)
         {
@@ -198,10 +144,9 @@ public:
 
     virtual void buildStandardPaths(FileSystem *fs, const std::string &python_home, std::list<std::string> &filePaths) override
     {
+        filePaths.push_back(fs->absoluteFilePath(python_home, "lib/libpython3.13.dylib"));
         filePaths.push_back(fs->absoluteFilePath(python_home, "lib/libpython3.12.dylib"));
         filePaths.push_back(fs->absoluteFilePath(python_home, "lib/libpython3.11.dylib"));
-        filePaths.push_back(fs->absoluteFilePath(python_home, "lib/libpython3.10.dylib"));
-        filePaths.push_back(fs->absoluteFilePath(python_home, "lib/libpython3.9.dylib"));
     }
 
     virtual void buildLibraryPaths(FileSystem *fs, const std::string &python_home, const std::string &python_home_new, std::list<std::string> &filePaths) override
@@ -260,22 +205,19 @@ public:
     virtual void buildVirtualEnvironmentPaths(FileSystem *fs, const std::string &python_home, const std::string &home_bin_path, const std::string &version, std::list<std::string> &filePaths) override
     {
         std::string homeParentDirectory = fs->parentDirectory(home_bin_path);
+        filePaths.push_back(fs->absoluteFilePath(homeParentDirectory, "lib/python3.12/config-3.12-x86_64-linux-gnu/libpython3.13.so"));
         filePaths.push_back(fs->absoluteFilePath(homeParentDirectory, "lib/python3.12/config-3.12-x86_64-linux-gnu/libpython3.12.so"));
         filePaths.push_back(fs->absoluteFilePath(homeParentDirectory, "lib/python3.11/config-3.11-x86_64-linux-gnu/libpython3.11.so"));
-        filePaths.push_back(fs->absoluteFilePath(homeParentDirectory, "lib/python3.10/config-3.10-x86_64-linux-gnu/libpython3.10.so"));
-        filePaths.push_back(fs->absoluteFilePath(homeParentDirectory, "lib/python3.9/config-3.9-x86_64-linux-gnu/libpython3.9.so"));
+        filePaths.push_back(fs->absoluteFilePath(homeParentDirectory, "lib/libpython3.13.so"));
         filePaths.push_back(fs->absoluteFilePath(homeParentDirectory, "lib/libpython3.12.so"));
         filePaths.push_back(fs->absoluteFilePath(homeParentDirectory, "lib/libpython3.11.so"));
-        filePaths.push_back(fs->absoluteFilePath(homeParentDirectory, "lib/libpython3.10.so"));
-        filePaths.push_back(fs->absoluteFilePath(homeParentDirectory, "lib/libpython3.9.so"));
     }
 
     virtual void buildStandardPaths(FileSystem *fs, const std::string &python_home, std::list<std::string> &filePaths) override
     {
+        filePaths.push_back(fs->absoluteFilePath(python_home, "lib/libpython3.13.so"));
         filePaths.push_back(fs->absoluteFilePath(python_home, "lib/libpython3.12.so"));
         filePaths.push_back(fs->absoluteFilePath(python_home, "lib/libpython3.11.so"));
-        filePaths.push_back(fs->absoluteFilePath(python_home, "lib/libpython3.10.so"));
-        filePaths.push_back(fs->absoluteFilePath(python_home, "lib/libpython3.9.so"));
     }
 
     virtual void buildLibraryPaths(FileSystem *fs, const std::string &python_home, const std::string &python_home_new, std::list<std::string> &filePaths) override
@@ -368,6 +310,11 @@ public:
 
     virtual void buildVirtualEnvironmentPaths(FileSystem *fs, const std::string &python_home, const std::string &home_bin_path, const std::string &version, std::list<std::string> &filePaths) override
     {
+        filePaths.push_back(fs->absoluteFilePath(python_home, "Scripts/Python313.dll"));
+        filePaths.push_back(fs->absoluteFilePath(python_home, "Python313.dll"));
+        filePaths.push_back(fs->absoluteFilePath(home_bin_path, "Scripts/Python313.dll"));
+        filePaths.push_back(fs->absoluteFilePath(home_bin_path, "Python313.dll"));
+
         filePaths.push_back(fs->absoluteFilePath(python_home, "Scripts/Python312.dll"));
         filePaths.push_back(fs->absoluteFilePath(python_home, "Python312.dll"));
         filePaths.push_back(fs->absoluteFilePath(home_bin_path, "Scripts/Python312.dll"));
@@ -377,32 +324,20 @@ public:
         filePaths.push_back(fs->absoluteFilePath(python_home, "Python311.dll"));
         filePaths.push_back(fs->absoluteFilePath(home_bin_path, "Scripts/Python311.dll"));
         filePaths.push_back(fs->absoluteFilePath(home_bin_path, "Python311.dll"));
-
-        filePaths.push_back(fs->absoluteFilePath(python_home, "Scripts/Python310.dll"));
-        filePaths.push_back(fs->absoluteFilePath(python_home, "Python310.dll"));
-        filePaths.push_back(fs->absoluteFilePath(home_bin_path, "Scripts/Python310.dll"));
-        filePaths.push_back(fs->absoluteFilePath(home_bin_path, "Python310.dll"));
-
-        filePaths.push_back(fs->absoluteFilePath(python_home, "Scripts/Python39.dll"));
-        filePaths.push_back(fs->absoluteFilePath(python_home, "Python39.dll"));
-        filePaths.push_back(fs->absoluteFilePath(home_bin_path, "Scripts/Python39.dll"));
-        filePaths.push_back(fs->absoluteFilePath(home_bin_path, "Python39.dll"));
     }
 
     virtual void buildStandardPaths(FileSystem *fs, const std::string &python_home, std::list<std::string> &filePaths) override
     {
+        filePaths.push_back(fs->absoluteFilePath(python_home, "Python313.dll"));
         filePaths.push_back(fs->absoluteFilePath(python_home, "Python312.dll"));
         filePaths.push_back(fs->absoluteFilePath(python_home, "Python311.dll"));
-        filePaths.push_back(fs->absoluteFilePath(python_home, "Python310.dll"));
-        filePaths.push_back(fs->absoluteFilePath(python_home, "Python39.dll"));
     }
 
     virtual void buildLibraryPaths(FileSystem *fs, const std::string &python_home, const std::string &python_home_new, std::list<std::string> &filePaths) override
     {
+        filePaths.push_back(fs->absoluteFilePath(python_home, "Scripts/python313.zip"));
         filePaths.push_back(fs->absoluteFilePath(python_home, "Scripts/python312.zip"));
         filePaths.push_back(fs->absoluteFilePath(python_home, "Scripts/python311.zip"));
-        filePaths.push_back(fs->absoluteFilePath(python_home, "Scripts/python310.zip"));
-        filePaths.push_back(fs->absoluteFilePath(python_home, "Scripts/python39.zip"));
         filePaths.push_back(fs->absoluteFilePath(python_home_new, "DLLs"));
         filePaths.push_back(fs->absoluteFilePath(python_home_new, "lib"));
         filePaths.push_back(python_home_new);
@@ -590,10 +525,6 @@ void PythonSupport::initialize(const std::string &python_home, const std::list<s
     // will need to acquire the GIL. the initial state is saved because the GIL is required to
     // finalize.
     m_initial_state = CALL_PY(PyEval_SaveThread)();
-
-    Python_ThreadBlock thread_block;
-
-    init_numpy();
 }
 
 void PythonSupport::deinitialize()
@@ -883,11 +814,11 @@ bool PythonSupport::setAttribute(PyObjectPtr *object, const std::string &attribu
 
 void PythonSupport::scaledImageFromRGBA(PyObject *ndarray_py, unsigned int dest_width, unsigned int dest_height, ImageInterface *image)
 {
-    PyArrayObject *array = (PyArrayObject *)PyArray_ContiguousFromObject(ndarray_py, NPY_UINT32, 2, 2);
-    if (array != NULL)
+    Py_buffer array;
+    if (CALL_PY(PyObject_GetBuffer)(ndarray_py, &array, PyBUF_ANY_CONTIGUOUS) >= 0)
     {
-        long width = PyArray_DIMS(array)[1];
-        long height = PyArray_DIMS(array)[0];
+        long width = array.shape[1];
+        long height = array.shape[0];
         if (dest_width < width * 0.75 || dest_height < height * 0.75)
         {
             image->create((int)dest_width, (int)dest_height, ImageFormat::Format_ARGB32);
@@ -941,7 +872,7 @@ void PythonSupport::scaledImageFromRGBA(PyObject *ndarray_py, unsigned int dest_
                     memset(b_buffer, 0, dest_width * sizeof(int));
                 }
 
-                uint32_t *src = ((uint32_t *)PyArray_DATA(array)) + row*width;
+                uint32_t *src = ((uint32_t *)array.buf) + row*width;
                 int *a_ptr = a_buffer;
                 int *r_ptr = r_buffer;
                 int *g_ptr = g_buffer;
@@ -1014,7 +945,7 @@ void PythonSupport::scaledImageFromRGBA(PyObject *ndarray_py, unsigned int dest_
             delete [] x_index_buffer;
             delete [] y_index_buffer;
 
-            Py_DECREF(array);
+            CALL_PY(PyBuffer_Release)(&array);
 
             // qDebug() << width << "x" << height << " --> " << dest_width << "x" << dest_height;
         }
@@ -1022,44 +953,44 @@ void PythonSupport::scaledImageFromRGBA(PyObject *ndarray_py, unsigned int dest_
         {
             image->create((int)width, (int)height, ImageFormat::Format_ARGB32);
             for (int row=0; row<height; ++row)
-                memcpy(image->scanLine(row), ((uint32_t *)PyArray_DATA(array)) + row*width, width*sizeof(uint32_t));
-            Py_DECREF(array);
+                memcpy(image->scanLine(row), ((uint32_t *)array.buf) + row*width, width*sizeof(uint32_t));
+            CALL_PY(PyBuffer_Release)(&array);
         }
     }
 }
 
 void PythonSupport::imageFromRGBA(PyObject *ndarray_py, ImageInterface *image)
 {
-    PyArrayObject *array = (PyArrayObject *)PyArray_ContiguousFromObject(ndarray_py, NPY_UINT32, 2, 2);
-    if (array != NULL)
+    Py_buffer array;
+    if (CALL_PY(PyObject_GetBuffer)(ndarray_py, &array, PyBUF_ANY_CONTIGUOUS) >= 0)
     {
-        long width = PyArray_DIMS(array)[1];
-        long height = PyArray_DIMS(array)[0];
+        long width = array.shape[1];
+        long height = array.shape[0];
         image->create((int)width, (int)height, ImageFormat::Format_ARGB32);
         for (int row=0; row<height; ++row)
-            memcpy(image->scanLine(row), ((uint32_t *)PyArray_DATA(array)) + row*width, width*sizeof(uint32_t));
-        Py_DECREF(array);
+            memcpy(image->scanLine(row), ((uint32_t *)array.buf) + row*width, width*sizeof(uint32_t));
+        CALL_PY(PyBuffer_Release)(&array);
     }
 }
 
 void PythonSupport::scaledImageFromArray(PyObject *ndarray_py, float width_, float height_, float context_scaling, float display_limit_low, float display_limit_high, PyObject *lookup_table_ndarray, ImageInterface *image)
 {
-    PyArrayObject *array = (PyArrayObject *)PyArray_ContiguousFromObject(ndarray_py, NPY_FLOAT32, 2, 2);
-    if (array != NULL)
+    Py_buffer array;
+    if (CALL_PY(PyObject_GetBuffer)(ndarray_py, &array, PyBUF_ANY_CONTIGUOUS) >= 0)
     {
-        long width = PyArray_DIMS(array)[1];
-        long height = PyArray_DIMS(array)[0];
+        long width = array.shape[1];
+        long height = array.shape[0];
         float m = display_limit_high != display_limit_low ? 255.0 / (display_limit_high - display_limit_low) : 1;
         std::vector<unsigned int> colorTable;
         if (lookup_table_ndarray != NULL)
         {
-            PyArrayObject *lookup_table_array = (PyArrayObject *)PyArray_ContiguousFromObject(lookup_table_ndarray, NPY_UINT32, 1, 1);
-            if (lookup_table_array != NULL)
+            Py_buffer view;
+            if (CALL_PY(PyObject_GetBuffer)(lookup_table_ndarray, &view, PyBUF_ANY_CONTIGUOUS) >= 0)
             {
-                uint32_t *lookup_table = ((uint32_t *)PyArray_DATA(lookup_table_array));
+                uint32_t *lookup_table = ((uint32_t *)view.buf);
                 for (int i=0; i<256; ++i)
                     colorTable.push_back(lookup_table[i]);
-                Py_DECREF(lookup_table_array);
+                CALL_PY(PyBuffer_Release)(&view);
             }
         }
         if (colorTable.size() == 0)
@@ -1115,7 +1046,7 @@ void PythonSupport::scaledImageFromArray(PyObject *ndarray_py, float width_, flo
                     memset(line_buffer, 0, dest_width * sizeof(float));
                 }
 
-                float *src = ((float *)PyArray_DATA(array)) + row*width;
+                float *src = ((float *)array.buf) + row*width;
                 float *line_ptr = line_buffer;
                 long *x_index_ptr = x_index_buffer;
 
@@ -1161,7 +1092,7 @@ void PythonSupport::scaledImageFromArray(PyObject *ndarray_py, float width_, flo
             delete [] y_index_buffer;
 
             image->setColorTable(colorTable);
-            Py_DECREF(array);
+            CALL_PY(PyBuffer_Release)(&array);
 
             // qDebug() << width << "x" << height << " --> " << dest_width << "x" << dest_height;
         }
@@ -1170,7 +1101,7 @@ void PythonSupport::scaledImageFromArray(PyObject *ndarray_py, float width_, flo
             image->create((int)width, (int)height, ImageFormat::Format_Indexed8);
             for (int row=0; row<height; ++row)
             {
-                float *src = ((float *)PyArray_DATA(array)) + row*width;
+                float *src = ((float *)array.buf) + row*width;
                 uint8_t *dst = (uint8_t *)image->scanLine(row);
                 for (int col=0; col<width; ++col)
                 {
@@ -1184,29 +1115,29 @@ void PythonSupport::scaledImageFromArray(PyObject *ndarray_py, float width_, flo
                 }
             }
             image->setColorTable(colorTable);
-            Py_DECREF(array);
+            CALL_PY(PyBuffer_Release)(&array);
         }
     }
 }
 
 void PythonSupport::imageFromArray(PyObject *ndarray_py, float display_limit_low, float display_limit_high, PyObject *lookup_table_ndarray, ImageInterface *image)
 {
-    PyArrayObject *array = (PyArrayObject *)PyArray_ContiguousFromObject(ndarray_py, NPY_FLOAT32, 2, 2);
-    if (array != NULL)
+    Py_buffer array;
+    if (CALL_PY(PyObject_GetBuffer)(ndarray_py, &array, PyBUF_ANY_CONTIGUOUS) >= 0)
     {
-        long width = PyArray_DIMS(array)[1];
-        long height = PyArray_DIMS(array)[0];
+        long width = array.shape[1];
+        long height = array.shape[0];
         float m = display_limit_high != display_limit_low ? 255.0 / (display_limit_high - display_limit_low) : 1;
         std::vector<unsigned int> colorTable;
         if (lookup_table_ndarray != NULL)
         {
-            PyArrayObject *lookup_table_array = (PyArrayObject *)PyArray_ContiguousFromObject(lookup_table_ndarray, NPY_UINT32, 1, 1);
-            if (lookup_table_array != NULL)
+            Py_buffer view;
+            if (CALL_PY(PyObject_GetBuffer)(lookup_table_ndarray, &view, PyBUF_ANY_CONTIGUOUS) >= 0)
             {
-                uint32_t *lookup_table = ((uint32_t *)PyArray_DATA(lookup_table_array));
+                uint32_t *lookup_table = ((uint32_t *)view.buf);
                 for (int i=0; i<256; ++i)
                     colorTable.push_back(lookup_table[i]);
-                Py_DECREF(lookup_table_array);
+                CALL_PY(PyBuffer_Release)(&view);
             }
         }
         if (colorTable.size() == 0)
@@ -1218,7 +1149,7 @@ void PythonSupport::imageFromArray(PyObject *ndarray_py, float display_limit_low
             image->create((int)width, (int)height, ImageFormat::Format_ARGB32_Premultiplied);
             for (int row=0; row<height; ++row)
             {
-                float *src = ((float *)PyArray_DATA(array)) + row*width;
+                float *src = ((float *)array.buf) + row*width;
                 uint32_t *dst = (uint32_t *)image->scanLine(row);
                 for (int col=0; col<width; ++col)
                 {
@@ -1234,14 +1165,14 @@ void PythonSupport::imageFromArray(PyObject *ndarray_py, float display_limit_low
                     }
                 }
             }
-            Py_DECREF(array);
+            CALL_PY(PyBuffer_Release)(&array);
         }
         else
         {
             image->create((int)width, (int)height, ImageFormat::Format_Indexed8);
             for (int row=0; row<height; ++row)
             {
-                float *src = ((float *)PyArray_DATA(array)) + row*width;
+                float *src = ((float *)array.buf) + row*width;
                 uint8_t *dst = (uint8_t *)image->scanLine(row);
                 for (int col=0; col<width; ++col)
                 {
@@ -1255,37 +1186,42 @@ void PythonSupport::imageFromArray(PyObject *ndarray_py, float display_limit_low
                 }
             }
             image->setColorTable(colorTable);
-            Py_DECREF(array);
+            CALL_PY(PyBuffer_Release)(&array);
         }
     }
 }
 
-PyObject *PythonSupport::arrayFromImage(const ImageInterface &image)
+void PythonSupport::arrayFromImage(const ImageInterface &image, PyObject *target)
 {
     Py_ssize_t dims[2];
     dims[0] = image.height();
     dims[1] = image.width();
 
-    PyObject *obj = PyArray_SimpleNew(2, dims, NPY_UINT32);
-
-    PyArrayObject *array = (PyArrayObject *)PyArray_ContiguousFromObject(obj, NPY_UINT32, 2, 2);
-
-    if (array != NULL)
+    Py_buffer array;
+    if (CALL_PY(PyObject_GetBuffer)(target, &array, PyBUF_ANY_CONTIGUOUS) >= 0)
     {
-        long height = PyArray_DIMS(array)[0];
-        long width = PyArray_DIMS(array)[1];
+        long height = array.shape[0];
+        long width = array.shape[1];
         for (int row=0; row<height; ++row)
-            memcpy(((uint32_t *)PyArray_DATA(array)) + row*width, image.scanLine(row), width*sizeof(uint32_t));
+            memcpy(((uint32_t *)array.buf) + row*width, image.scanLine(row), width*sizeof(uint32_t));
+        CALL_PY(PyBuffer_Release)(&array);
+    }
+}
 
-        Py_DECREF(array);
+void PythonSupport::shapeFromImage(PyObject *arrayImage, int &width, int &height)
+{
+    Py_buffer array;
+    if (CALL_PY(PyObject_GetBuffer)(arrayImage, &array, PyBUF_ANY_CONTIGUOUS) >= 0)
+    {
+        height = array.shape[0];
+        width = array.shape[1];
 
-        return obj;
+        CALL_PY(PyBuffer_Release)(&array);
     }
     else
     {
-        Py_DECREF(obj);
-
-        return NULL;
+        height = 0;
+        width = 0;
     }
 }
 
