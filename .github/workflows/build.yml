@@ -18,9 +18,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-20.04]
+        os: [ubuntu-22.04]
         python-version: ["3.11", "3.12", "3.13"]
-        qt-version: ["6.8.1"]
+        qt-version: ["6.8.2"]
     steps:
     - uses: actions/checkout@v4
     - name: Set up Python ${{ matrix.python-version }}
@@ -47,7 +47,7 @@ jobs:
         python -m pip install packaging build cibuildwheel
         pushd launcher
         PYTHON=`python -c "import sys; print(sys.executable, end='')"`
-        cmake CMakeLists.txt -DGIT_REPO=${{ github.repository }} -DGIT_REF=${{ github.ref }} -DGIT_SHA=${{ github.sha }}
+        cmake CMakeLists.txt -DGIT_REPO=${{ github.repository }} -DGIT_REF="${{ github.ref }}" -DGIT_SHA=${{ github.sha }}
         cmake --build . --config Release
         mkdir -p linux
         mv build linux/x64
@@ -66,6 +66,8 @@ jobs:
         cp ../Qt/${{ matrix.qt-version }}/gcc_64/plugins/platforms/libqxcb.so launcher/linux/x64/plugins/platforms
         cp ../Qt/${{ matrix.qt-version }}/gcc_64/plugins/imageformats/libq* launcher/linux/x64/plugins/imageformats
         rm launcher/linux/x64/plugins/imageformats/libqsvg.so
+        sudo apt-get update
+        sudo apt-get -y install chrpath
         chrpath -r "\$ORIGIN" launcher/linux/x64/libicu*.so.73
         chrpath -r "\$ORIGIN/../.." launcher/linux/x64/plugins/platforms/libqxcb.so
         chrpath -r "\$ORIGIN/../.." launcher/linux/x64/plugins/imageformats/*.so
@@ -105,16 +107,16 @@ jobs:
         os: [macos-13]
         python-version: ["3.11", "3.12", "3.13"]
         architecture: [x86_64]
-        qt-version: ["6.8.1"]
+        qt-version: ["6.8.2"]
         include:
             - os: macos-14
               python-version: "3.12"
               architecture: arm64
-              qt-version: "6.8.1"
+              qt-version: "6.8.2"
             - os: macos-14
               python-version: "3.13"
               architecture: arm64
-              qt-version: "6.8.1"
+              qt-version: "6.8.2"
     steps:
     - uses: actions/checkout@v4
     - name: Set up Python ${{ matrix.python-version }}
@@ -146,7 +148,7 @@ jobs:
         python -m pip install packaging build cibuildwheel
         pushd launcher
         PYTHON=`python -c "import sys; print(sys.executable, end='')"`
-        cmake CMakeLists.txt -DGIT_REPO=${{ github.repository }} -DGIT_REF=${{ github.ref }} -DGIT_SHA=${{ github.sha }}
+        cmake CMakeLists.txt -DGIT_REPO=${{ github.repository }} -DGIT_REF="${{ github.ref }}" -DGIT_SHA=${{ github.sha }}
         cmake --build . --config Release
         pushd build
         echo -n "$MACOS_CERTIFICATE" | base64 -d > certificate.p12
@@ -219,7 +221,7 @@ jobs:
       matrix:
         os: [windows-2019]
         python-version: ["3.11", "3.12", "3.13"]
-        qt-version: ["6.8.1"]
+        qt-version: ["6.8.2"]
     steps:
     - uses: actions/checkout@v4
     - name: Set up Python ${{ matrix.python-version }}
@@ -246,7 +248,7 @@ jobs:
         python -m pip install packaging build cibuildwheel
         pushd launcher
         $PYTHON_EXEC = python -c "import sys; print(sys.executable, end='')"
-        cmake CMakeLists.txt -DGIT_REPO=${{ github.repository }} -DGIT_REF=${{ github.ref }} -DGIT_SHA=${{ github.sha }}
+        cmake CMakeLists.txt -DGIT_REPO=${{ github.repository }} -DGIT_REF="${{ github.ref }}" -DGIT_SHA=${{ github.sha }}
         cmake --build . --config Release
         Get-ChildItem -Include *.pdb -Recurse | foreach { $_.Delete() }
         Get-ChildItem build\Release\imageformats -Include *d.dll -Recurse | foreach { $_.Delete() }
@@ -287,7 +289,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-20.04, ubuntu-22.04, ubuntu-24.04]
+        os: [ubuntu-22.04, ubuntu-24.04]
         python-version: ["3.11", "3.12", "3.13"]
     steps:
     - uses: actions/checkout@v4
@@ -408,7 +410,7 @@ jobs:
         sleep 5
         conda deactivate
     - name: Build/publish anaconda package
-      if: github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags') && matrix.os == 'ubuntu-20.04'
+      if: github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags') && matrix.os == 'ubuntu-22.04'
       shell: bash -l {0}
       run: |
         # make a directory to avoid name conflicts with the channel. argh.
@@ -439,16 +441,16 @@ jobs:
         os: [macos-13]
         python-version: ["3.11", "3.12", "3.13"]
         architecture: [x86_64]
-        qt-version: ["6.8.1"]
+        qt-version: ["6.8.2"]
         include:
             - os: macos-14
               python-version: "3.12"
               architecture: arm64
-              qt-version: "6.8.1"
+              qt-version: "6.8.2"
             - os: macos-14
               python-version: "3.13"
               architecture: arm64
-              qt-version: "6.8.1"
+              qt-version: "6.8.2"
     steps:
     - uses: actions/checkout@v4
     - name: Download Wheel
