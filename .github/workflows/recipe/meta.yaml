@@ -6,7 +6,7 @@
 {% set win_exe = "NionSwift" %}
 {% set summary = "A native launcher for Nion Swift." %}
 
-{% set version = "5.1.3" %}
+{% set version = "5.1.4" %}
 
 {% set name_u = name|replace('-', '_') %}
 
