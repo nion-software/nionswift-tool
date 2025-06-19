@@ -1,6 +1,12 @@
 Changelog (nionswift-tool)
 ==========================
 
+5.1.5 (2025-06-18)
+------------------
+- Add support for handling tab/backtab in canvas items.
+- Improve handling of text color, particularly on macOS.
+- Update to Qt 6.9.1
+
 5.1.4 (2025-04-09)
 ------------------
 - Fix issue drag and drop cursor handling.
