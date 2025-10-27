@@ -1,6 +1,11 @@
 Changelog (nionswift-tool)
 ==========================
 
+5.2.0 (2025-10-27)
+------------------
+- Add support for Python 3.14; drop support for Python 3.11.
+- Update to Qt 6.10.0
+
 5.1.5 (2025-06-18)
 ------------------
 - Add support for handling tab/backtab in canvas items.
