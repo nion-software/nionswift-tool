@@ -11,6 +11,7 @@ env:
   tool-id: nionswift-tool
   tool-package: nionswift
   tool-exe: nionswift --app
+  qt-version: "6.11.1"
 
 jobs:
   build_linux:
@@ -19,8 +20,18 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-22.04]
-        python-version: ["3.12", "3.13", "3.14"]
-        qt-version: ["6.10.0"]
+        python-version: ["3.14"]
+        qt-host: ["linux"]
+        qt-arch: ["linux_gcc_64"]
+        qt-subdir: ["gcc_64"]
+        arch_dir: ["x64"]
+        include:
+          - os: ubuntu-24.04-arm
+            python-version: "3.14"
+            qt-host: "linux_arm64"
+            qt-arch: "linux_gcc_arm64"
+            qt-subdir: "gcc_arm64"
+            arch_dir: "arm64"
     steps:
     - uses: actions/checkout@v5
     - name: Set up Python ${{ matrix.python-version }}
@@ -33,12 +44,12 @@ jobs:
         python -c "import sys; print(sys.version)"
         python -c "import sys; print(sys.executable)"
     - name: Install Qt
-      uses: jurplel/install-qt-action@v3
+      uses: jurplel/install-qt-action@v4
       with:
-        version: ${{ matrix.qt-version }}
-        host: 'linux'
+        version: ${{ env.qt-version }}
+        host: ${{ matrix.qt-host }}
+        arch: ${{ matrix.qt-arch }}
         target: 'desktop'
-        arch: 'linux_gcc_64'
     - name: Build
       shell: bash
       run: |
@@ -50,73 +61,44 @@ jobs:
         cmake CMakeLists.txt -DGIT_REPO=${{ github.repository }} -DGIT_REF="${{ github.ref }}" -DGIT_SHA=${{ github.sha }}
         cmake --build . --config Release
         mkdir -p linux
-        mv build linux/x64
+        mv build linux/${{ matrix.arch_dir }}
         popd
-        cp ../Qt/${{ matrix.qt-version }}/gcc_64/lib/libQt6Core.so.6 launcher/linux/x64
-        cp ../Qt/${{ matrix.qt-version }}/gcc_64/lib/libQt6DBus.so.6 launcher/linux/x64
-        cp ../Qt/${{ matrix.qt-version }}/gcc_64/lib/libQt6Gui.so.6 launcher/linux/x64
-        cp ../Qt/${{ matrix.qt-version }}/gcc_64/lib/libQt6OpenGL.so.6 launcher/linux/x64
-        cp ../Qt/${{ matrix.qt-version }}/gcc_64/lib/libQt6Widgets.so.6 launcher/linux/x64
-        cp ../Qt/${{ matrix.qt-version }}/gcc_64/lib/libQt6XcbQpa.so.6 launcher/linux/x64
-        cp ../Qt/${{ matrix.qt-version }}/gcc_64/lib/libicui18n.so.73 launcher/linux/x64
-        cp ../Qt/${{ matrix.qt-version }}/gcc_64/lib/libicudata.so.73 launcher/linux/x64
-        cp ../Qt/${{ matrix.qt-version }}/gcc_64/lib/libicuuc.so.73 launcher/linux/x64
-        mkdir -p launcher/linux/x64/plugins/platforms
-        mkdir -p launcher/linux/x64/plugins/imageformats
-        cp ../Qt/${{ matrix.qt-version }}/gcc_64/plugins/platforms/libqxcb.so launcher/linux/x64/plugins/platforms
-        cp ../Qt/${{ matrix.qt-version }}/gcc_64/plugins/imageformats/libq* launcher/linux/x64/plugins/imageformats
-        rm launcher/linux/x64/plugins/imageformats/libqsvg.so
+        cp ../Qt/${{ env.qt-version }}/${{ matrix.qt-subdir }}/lib/libQt6Core.so.6 launcher/linux/${{ matrix.arch_dir }}
+        cp ../Qt/${{ env.qt-version }}/${{ matrix.qt-subdir }}/lib/libQt6DBus.so.6 launcher/linux/${{ matrix.arch_dir }}
+        cp ../Qt/${{ env.qt-version }}/${{ matrix.qt-subdir }}/lib/libQt6Gui.so.6 launcher/linux/${{ matrix.arch_dir }}
+        cp ../Qt/${{ env.qt-version }}/${{ matrix.qt-subdir }}/lib/libQt6OpenGL.so.6 launcher/linux/${{ matrix.arch_dir }}
+        cp ../Qt/${{ env.qt-version }}/${{ matrix.qt-subdir }}/lib/libQt6Widgets.so.6 launcher/linux/${{ matrix.arch_dir }}
+        cp ../Qt/${{ env.qt-version }}/${{ matrix.qt-subdir }}/lib/libQt6XcbQpa.so.6 launcher/linux/${{ matrix.arch_dir }}
+        cp ../Qt/${{ env.qt-version }}/${{ matrix.qt-subdir }}/lib/libicui18n.so.73 launcher/linux/${{ matrix.arch_dir }}
+        cp ../Qt/${{ env.qt-version }}/${{ matrix.qt-subdir }}/lib/libicudata.so.73 launcher/linux/${{ matrix.arch_dir }}
+        cp ../Qt/${{ env.qt-version }}/${{ matrix.qt-subdir }}/lib/libicuuc.so.73 launcher/linux/${{ matrix.arch_dir }}
+        mkdir -p launcher/linux/${{ matrix.arch_dir }}/plugins/platforms
+        mkdir -p launcher/linux/${{ matrix.arch_dir }}/plugins/imageformats
+        cp ../Qt/${{ env.qt-version }}/${{ matrix.qt-subdir }}/plugins/platforms/libqxcb.so launcher/linux/${{ matrix.arch_dir }}/plugins/platforms
+        cp ../Qt/${{ env.qt-version }}/${{ matrix.qt-subdir }}/plugins/imageformats/libq* launcher/linux/${{ matrix.arch_dir }}/plugins/imageformats
+        rm launcher/linux/${{ matrix.arch_dir }}/plugins/imageformats/libqsvg.so
         sudo apt-get update
         sudo apt-get -y install chrpath
-        chrpath -r "\$ORIGIN" launcher/linux/x64/libicu*.so.73
-        chrpath -r "\$ORIGIN/../.." launcher/linux/x64/plugins/platforms/libqxcb.so
-        chrpath -r "\$ORIGIN/../.." launcher/linux/x64/plugins/imageformats/*.so
-        printf "[Paths]\nPrefix=.\nPlugins=plugins\n" > launcher/linux/x64/qt.conf
+        chrpath -r "\$ORIGIN" launcher/linux/${{ matrix.arch_dir }}/libicu*.so.73
+        chrpath -r "\$ORIGIN/../.." launcher/linux/${{ matrix.arch_dir }}/plugins/platforms/libqxcb.so
+        chrpath -r "\$ORIGIN/../.." launcher/linux/${{ matrix.arch_dir }}/plugins/imageformats/*.so
+        printf "[Paths]\nPrefix=.\nPlugins=plugins\n" > launcher/linux/${{ matrix.arch_dir }}/qt.conf
         python -m build .
-    - name: Set up Miniconda ${{ matrix.python-version }}
-      uses: conda-incubator/setup-miniconda@v3
-      with:
-        auto-update-conda: true
-        python-version: "3.12"
-        miniconda-version: "latest"
-    - name: Build Conda Package
-      shell: bash -l {0}
-      run: |
-        python -c "import sys; print(sys.version)"
-        python -c "import sys; print(sys.executable)"
-        conda update --all -q -y
-        conda install -q conda-build -y
-        conda build -q --python ${{ matrix.python-version }} ./.github/workflows/recipe
-        OUT_FILE=$(conda build --python ${{ matrix.python-version }} --output ./.github/workflows/recipe)
-        mv $OUT_FILE dist
     - name: Upload Wheel
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
+      id: upload-wheel
       with:
-        name: ${{ env.tool-id }}-linux-whl-${{ matrix.python-version }}
+        if-no-files-found: error
+        archive: False
         path: dist/*.whl
-    - name: Upload Conda Package
-      uses: actions/upload-artifact@v4
-      with:
-        name: ${{ env.tool-id }}-linux-conda-${{ matrix.python-version }}
-        path: dist/*.conda
   build_macos:
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         os: [macos-14]
-        python-version: ["3.12", "3.13", "3.14"]
+        python-version: ["3.14"]
         architecture: [arm64]
-        qt-version: ["6.10.0"]
-        include:
-            - os: macos-13
-              python-version: "3.12"
-              architecture: x86_64
-              qt-version: "6.10.0"
-            - os: macos-13
-              python-version: "3.13"
-              architecture: x86_64
-              qt-version: "6.10.0"
     steps:
     - uses: actions/checkout@v5
     - name: Set up Python ${{ matrix.python-version }}
@@ -129,9 +111,9 @@ jobs:
         python -c "import sys; print(sys.version)"
         python -c "import sys; print(sys.executable)"
     - name: Install Qt
-      uses: jurplel/install-qt-action@v3
+      uses: jurplel/install-qt-action@v4
       with:
-        version: ${{ matrix.qt-version }}
+        version: ${{ env.qt-version }}
         host: 'mac'
         target: 'desktop'
     - name: Build
@@ -190,40 +172,28 @@ jobs:
         export CIBW_REPAIR_WHEEL_COMMAND=""
         python -m cibuildwheel --output-dir dist
     - name: Upload Wheel
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
+      id: upload-wheel
       with:
-        name: ${{ env.tool-id }}-macos-whl-${{ matrix.architecture }}-${{ matrix.python-version }}
+        if-no-files-found: error
+        archive: False
         path: dist/*.whl
-    - name: Set up Miniconda ${{ matrix.python-version }}
-      uses: conda-incubator/setup-miniconda@v3
-      with:
-        auto-update-conda: true
-        python-version: "3.12"
-        miniconda-version: "latest"
-        architecture: ${{ matrix.architecture }}
-    - name: Build Conda Package
-      shell: bash -l {0}
-      run: |
-        python -c "import sys; print(sys.version)"
-        python -c "import sys; print(sys.executable)"
-        conda update --all -q -y
-        conda install -q conda-build -y
-        conda build -q --python ${{ matrix.python-version }} ./.github/workflows/recipe
-        OUT_FILE=$(conda build --python ${{ matrix.python-version }} --output ./.github/workflows/recipe)
-        mv $OUT_FILE dist
-    - name: Upload Conda Package
-      uses: actions/upload-artifact@v4
-      with:
-        name: ${{ env.tool-id }}-macos-conda-${{ matrix.architecture }}-${{ matrix.python-version }}
-        path: dist/*.conda
   build_win:
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         os: [windows-2022]
-        python-version: ["3.12", "3.13", "3.14"]
-        qt-version: ["6.10.0"]
+        python-version: ["3.14"]
+        arch_dir: ["x64"]
+        qt-host: ["windows"]
+        qt-arch: ["win64_msvc2022_64"]
+        include:
+          - os: windows-11-arm
+            python-version: "3.14"
+            arch_dir: "arm64"
+            qt-host: "windows_arm64"
+            qt-arch: "win64_msvc2022_arm64"
     steps:
     - uses: actions/checkout@v5
     - name: Set up Python ${{ matrix.python-version }}
@@ -236,12 +206,14 @@ jobs:
         python -c "import sys; print(sys.version)"
         python -c "import sys; print(sys.executable)"
     - name: Install Qt
-      uses: jurplel/install-qt-action@v3
+      uses: jurplel/install-qt-action@v4
       with:
-        version: ${{ matrix.qt-version }}
-        host: 'windows'
+        version: ${{ env.qt-version }}
+        host: ${{ matrix.qt-host }}
+        arch: ${{ matrix.qt-arch }}
         target: 'desktop'
-        arch: 'win64_msvc2022_64'
+        # to install Qt 6.11, aqtinstall requires a release more recent than 3.3.0
+        aqtsource: "git+https://github.com/miurahr/aqtinstall.git@073e34d7c2ab4ae6961ed7cca690b3abd5ba5a7e"
     - name: Build
       shell: pwsh
       run: |
@@ -255,36 +227,17 @@ jobs:
         Get-ChildItem -Include *.pdb -Recurse | foreach { $_.Delete() }
         Get-ChildItem build\Release\imageformats -Include *d.dll -Recurse | foreach { $_.Delete() }
         Rename-Item -Path build\Release\NionSwiftLauncher.exe -NewName NionSwift.exe
-        Remove-Item -Recurse -Force x64\*
-        Move-Item -Path build\Release -Destination x64
+        Remove-Item -Recurse -Force ${{ matrix.arch_dir }}\*
+        Move-Item -Path build\Release -Destination ${{ matrix.arch_dir }}
         popd
         python -m build .
-    - name: Set up Miniconda ${{ matrix.python-version }}
-      uses: conda-incubator/setup-miniconda@v3
-      with:
-        auto-update-conda: true
-        python-version: "3.12"
-        miniconda-version: "latest"
-    - name: Build Conda Package
-      shell: bash -l {0}
-      run: |
-        python -c "import sys; print(sys.version)"
-        python -c "import sys; print(sys.executable)"
-        conda update --all -q -y
-        conda install -q conda-build -y
-        conda build -q --python ${{ matrix.python-version }} ./.github/workflows/recipe
-        OUT_FILE=$(conda build --python ${{ matrix.python-version }} --output ./.github/workflows/recipe)
-        mv $OUT_FILE dist
     - name: Upload Wheel
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
+      id: upload-wheel
       with:
-        name: ${{ env.tool-id }}-win-whl-${{ matrix.python-version }}
+        if-no-files-found: error
+        archive: False
         path: dist/*.whl
-    - name: Upload Conda Package
-      uses: actions/upload-artifact@v4
-      with:
-        name: ${{ env.tool-id }}-win-conda-${{ matrix.python-version }}
-        path: dist/*.conda
   test_linux:
     needs: build_linux
     runs-on: ${{ matrix.os }}
@@ -293,20 +246,21 @@ jobs:
       matrix:
         os: [ubuntu-22.04, ubuntu-24.04]
         python-version: ["3.12", "3.13", "3.14"]
+        wheel_match: ["manylinux_2_28_x86_64"]
+        include:
+          - os: ubuntu-24.04-arm
+            python-version: "3.14"
+            wheel_match: "manylinux_2_28_aarch64"
     steps:
     - uses: actions/checkout@v5
     - name: Download Wheel
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8
       id: download_wheel
       with:
-        name: ${{ env.tool-id }}-linux-whl-${{ matrix.python-version }}
+        pattern: "*${{ matrix.wheel_match }}*.whl"
+        merge-multiple: true
+        skip-decompress: true
         path: downloads
-    - name: Download Conda
-      uses: actions/download-artifact@v4
-      id: download_conda
-      with:
-        name: ${{ env.tool-id }}-linux-conda-${{ matrix.python-version }}
-        path: conda_downloads
     - name: Set up Python ${{ matrix.python-version }} with official build
       uses: actions/setup-python@v6
       with:
@@ -350,88 +304,6 @@ jobs:
         xvfb-run -a ${{ env.tool-exe }} nionui_app.test_ack | grep ACK
         sleep 5
         deactivate
-    - name: Set up Miniconda ${{ matrix.python-version }}
-      uses: conda-incubator/setup-miniconda@v3
-      with:
-        auto-update-conda: true
-        activate-environment: test-environment
-        miniconda-version: "latest"
-        python-version: ${{ matrix.python-version }}
-        auto-activate-base: false
-    - name: Test Conda
-      shell: bash -l {0}
-      run: |
-        # use conda versions instead of pypi versions. install before anything else.
-        conda create -q -n test-env-conda -c conda-forge python=${{ matrix.python-version }} numpy scipy h5py imageio setuptools pip -y
-        conda activate test-env-conda
-        # this does not work on ubuntu with Qt 6.8.
-        # until numpy 2 is available, use pip
-        # pip install numpy scipy h5py imageio setuptools
-        # until numpy 2 compatible versions are on nion channel, use direct source
-        pip install git+https://github.com/nion-software/nionutils.git#egg=nionutils
-        pip install git+https://github.com/nion-software/nionui.git#egg=nionui
-        pip install git+https://github.com/nion-software/niondata.git#egg=niondata
-        pip install git+https://github.com/nion-software/nionswift-io.git#egg=nionswift-io
-        pip install git+https://github.com/nion-software/nionswift.git#egg=nionswift
-        # conda install -q -y -c nion ${{ env.tool-package }}
-        conda install -q -y ${{steps.download_conda.outputs.download-path}}/*.conda
-        pushd nionui_app_test
-        python -m pip install .
-        popd
-        echo "Running test..."
-        conda list
-        xvfb-run -a ${{ env.tool-exe }} nionui_app.test_ack
-        sleep 5
-        xvfb-run -a ${{ env.tool-exe }} nionui_app.test_ack | grep ACK
-        sleep 5
-        conda deactivate
-    - name: Test Conda Forge
-      shell: bash -l {0}
-      run: |
-        # use conda versions instead of pypi versions. install before anything else.
-        conda create -q -n test-env -c conda-forge python=${{ matrix.python-version }} numpy scipy h5py imageio setuptools -y
-        conda activate test-env
-        # until numpy 2 compatible versions are on nion channel, use direct source
-        pip install git+https://github.com/nion-software/nionutils.git#egg=nionutils
-        pip install git+https://github.com/nion-software/nionui.git#egg=nionui
-        pip install git+https://github.com/nion-software/niondata.git#egg=niondata
-        pip install git+https://github.com/nion-software/nionswift-io.git#egg=nionswift-io
-        pip install git+https://github.com/nion-software/nionswift.git#egg=nionswift
-        # conda install -q -y -c nion -c conda-forge ${{ env.tool-package }}
-        conda install -q -y -c conda-forge ${{steps.download_conda.outputs.download-path}}/*.conda
-        pushd nionui_app_test
-        python -m pip install .
-        popd
-        echo "Running test..."
-        conda list
-        xvfb-run -a ${{ env.tool-exe }} nionui_app.test_ack
-        sleep 5
-        xvfb-run -a ${{ env.tool-exe }} nionui_app.test_ack | grep ACK
-        sleep 5
-        conda deactivate
-    - name: Build/publish anaconda package
-      if: github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags') && matrix.os == 'ubuntu-22.04'
-      shell: bash -l {0}
-      run: |
-        # make a directory to avoid name conflicts with the channel. argh.
-        mkdir conda_build
-        pushd conda_build
-        echo "conda create anaconda-client env"
-        conda create -n upload-env -q conda-build anaconda-client -y
-        echo "activate"
-        conda activate upload-env
-        echo "conda info"
-        conda info
-        echo "conda list"
-        conda list
-        echo "directory list"
-        ls -Rl ${{steps.download_conda.outputs.download-path}}
-        echo "anaconda upload"
-        anaconda --token ${{ secrets.anaconda_token }} upload --user nion --skip-existing ${{steps.download_conda.outputs.download-path}}/*.conda
-        echo "deactivate"
-        conda deactivate
-        echo "popd"
-        popd
   test_macos:
     needs: build_macos
     runs-on: ${{ matrix.os }}
@@ -440,31 +312,17 @@ jobs:
       matrix:
         os: [macos-14]
         python-version: ["3.12", "3.13", "3.14"]
-        architecture: [arm64]
-        qt-version: ["6.10.0"]
-        include:
-            - os: macos-13
-              python-version: "3.12"
-              architecture: x86_64
-              qt-version: "6.10.0"
-            - os: macos-13
-              python-version: "3.13"
-              architecture: x86_64
-              qt-version: "6.10.0"
+        wheel_match: ["macosx_11_0_arm64"]
     steps:
     - uses: actions/checkout@v5
     - name: Download Wheel
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8
       id: download_wheel
       with:
-        name: ${{ env.tool-id }}-macos-whl-${{ matrix.architecture }}-${{ matrix.python-version }}
+        pattern: "*${{ matrix.wheel_match }}*.whl"
+        merge-multiple: true
+        skip-decompress: true
         path: downloads
-    - name: Download Conda
-      uses: actions/download-artifact@v4
-      id: download_conda
-      with:
-        name: ${{ env.tool-id }}-macos-conda-${{ matrix.architecture }}-${{ matrix.python-version }}
-        path: conda_downloads
     - name: Set up Python ${{ matrix.python-version }} with official build
       uses: actions/setup-python@v6
       with:
@@ -520,79 +378,6 @@ jobs:
         ${{ env.tool-exe }} nionui_app.test_ack
         ${{ env.tool-exe }} nionui_app.test_ack | grep ACK
         deactivate
-    - name: Set up Miniconda ${{ matrix.python-version }}
-      uses: conda-incubator/setup-miniconda@v3
-      with:
-        auto-update-conda: true
-        activate-environment: test-environment
-        miniconda-version: "latest"
-        python-version: ${{ matrix.python-version }}
-        architecture: ${{ matrix.architecture }}
-        auto-activate-base: false
-    - name: Test Conda
-      shell: bash -l {0}
-      run: |
-        # use conda versions instead of pypi versions. install before anything else.
-        # until numpy 2 is available, use pip
-        pip install numpy scipy h5py imageio setuptools
-        ## use nomkl until anaconda gets its act together
-        # conda install -q nomkl numpy scipy h5py imageio setuptools -y
-        # until numpy 2 compatible versions are on nion channel, use direct source
-        pip install git+https://github.com/nion-software/nionutils.git#egg=nionutils
-        pip install git+https://github.com/nion-software/nionui.git#egg=nionui
-        pip install git+https://github.com/nion-software/niondata.git#egg=niondata
-        pip install git+https://github.com/nion-software/nionswift-io.git#egg=nionswift-io
-        pip install git+https://github.com/nion-software/nionswift.git#egg=nionswift
-        # conda install -q -y -c nion ${{ env.tool-package }}
-        FILENAME=$(find '${{steps.download_conda.outputs.download-path}}' -name "*.conda")
-        echo "Installing '$FILENAME'"
-        conda install -q -y -c conda-forge $FILENAME
-        pushd nionui_app_test
-        python -m pip install .
-        popd
-        echo "Running test..."
-        conda list
-        ${{ env.tool-exe }} nionui_app.test_ack
-        ${{ env.tool-exe }} nionui_app.test_ack | grep ACK
-    - name: Test Conda Forge
-      shell: bash -l {0}
-      run: |
-        # use conda versions instead of pypi versions. install before anything else.
-        # use nomkl until anaconda gets its act together
-        conda create -n test-env -c conda-forge -q python=${{ matrix.python-version }} numpy scipy h5py imageio setuptools -y
-        conda activate test-env
-        # until numpy 2 compatible versions are on nion channel, use direct source
-        pip install git+https://github.com/nion-software/nionutils.git#egg=nionutils
-        pip install git+https://github.com/nion-software/nionui.git#egg=nionui
-        pip install git+https://github.com/nion-software/niondata.git#egg=niondata
-        pip install git+https://github.com/nion-software/nionswift-io.git#egg=nionswift-io
-        pip install git+https://github.com/nion-software/nionswift.git#egg=nionswift
-        # conda install -q -y -c nion -c conda-forge ${{ env.tool-package }}
-        FILENAME=$(find '${{steps.download_conda.outputs.download-path}}' -name "*.conda")
-        echo "Installing '$FILENAME'"
-        conda install -q -y -c conda-forge $FILENAME
-        pushd nionui_app_test
-        python -m pip install .
-        popd
-        echo "Running test..."
-        conda list
-        ${{ env.tool-exe }} nionui_app.test_ack
-        ${{ env.tool-exe }} nionui_app.test_ack | grep ACK
-        conda deactivate
-    - name: Build/publish anaconda package
-      if: github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags')
-      shell: bash -l {0}
-      run: |
-        # make a directory to avoid name conflicts with the channel. argh.
-        mkdir conda_build
-        pushd conda_build
-        conda create -n upload-env -q conda-build anaconda-client -y
-        conda activate upload-env
-        FILENAME=$(find '${{steps.download_conda.outputs.download-path}}' -name "*.conda")
-        echo "Send to Anaconda '$FILENAME'"
-        anaconda --token ${{ secrets.anaconda_token }} upload --user nion --skip-existing $FILENAME
-        conda deactivate
-        popd
   test_win:
     needs: build_win
     runs-on: ${{ matrix.os }}
@@ -601,20 +386,24 @@ jobs:
       matrix:
         os: [windows-2022]
         python-version: ["3.12", "3.13", "3.14"]
+        wheel_match: ["win_amd64"]
+        include:
+          - os: windows-11-arm
+            python-version: "3.14"
+            wheel_match: "win_arm64"
+          - os: windows-2025
+            python-version: "3.14"
+            wheel_match: "win_amd64"
     steps:
     - uses: actions/checkout@v5
     - name: Download Wheel
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8
       id: download_wheel
       with:
-        name: ${{ env.tool-id }}-win-whl-${{ matrix.python-version }}
+        pattern: "*${{ matrix.wheel_match }}*.whl"
+        merge-multiple: true
+        skip-decompress: true
         path: downloads
-    - name: Download Conda
-      uses: actions/download-artifact@v4
-      id: download_conda
-      with:
-        name: ${{ env.tool-id }}-win-conda-${{ matrix.python-version }}
-        path: conda_downloads
     - name: Set up Python ${{ matrix.python-version }} with official build
       uses: actions/setup-python@v6
       with:
@@ -645,80 +434,10 @@ jobs:
         ${{ env.tool-exe }} nionui_app.test_ack
         ${{ env.tool-exe }} nionui_app.test_ack | grep ACK
         deactivate
-    - name: Set up Miniconda ${{ matrix.python-version }}
-      uses: conda-incubator/setup-miniconda@v3
-      with:
-        auto-update-conda: true
-        activate-environment: test-environment
-        miniconda-version: "latest"
-        python-version: ${{ matrix.python-version }}
-        auto-activate-base: false
-    - name: Test Conda
-      shell: pwsh
-      run: |
-        # use conda versions instead of pypi versions. install before anything else.
-        conda update -q --all -y
-        # until numpy 2 is available, use pip
-        pip install numpy scipy h5py imageio setuptools
-        # conda install -q numpy scipy h5py imageio setuptools pip -y
-        # until numpy 2 compatible versions are on nion channel, use direct source
-        pip install git+https://github.com/nion-software/nionutils.git#egg=nionutils
-        pip install git+https://github.com/nion-software/nionui.git#egg=nionui
-        pip install git+https://github.com/nion-software/niondata.git#egg=niondata
-        pip install git+https://github.com/nion-software/nionswift-io.git#egg=nionswift-io
-        pip install git+https://github.com/nion-software/nionswift.git#egg=nionswift
-        # conda install -q -y -c nion ${{ env.tool-package }}
-        $filename = Get-ChildItem -name ${{steps.download_conda.outputs.download-path}}\*.conda
-        conda install -q -y ${{steps.download_conda.outputs.download-path}}\$filename
-        pushd nionui_app_test
-        python -m pip install .
-        popd
-        echo "Running test..."
-        conda list
-        ${{ env.tool-exe }} nionui_app.test_ack
-        ${{ env.tool-exe }} nionui_app.test_ack | grep ACK
-    - name: Test Conda Forge
-      shell: pwsh
-      run: |
-        # use conda versions instead of pypi versions. install before anything else.
-        conda create -n test-env -c conda-forge -q python=${{ matrix.python-version }} numpy scipy h5py imageio setuptools -y
-        conda activate test-env
-        # until numpy 2 compatible versions are on nion channel, use direct source
-        pip install git+https://github.com/nion-software/nionutils.git#egg=nionutils
-        pip install git+https://github.com/nion-software/nionui.git#egg=nionui
-        pip install git+https://github.com/nion-software/niondata.git#egg=niondata
-        pip install git+https://github.com/nion-software/nionswift-io.git#egg=nionswift-io
-        pip install git+https://github.com/nion-software/nionswift.git#egg=nionswift
-        # conda install -q -y -c nion -c conda-forge ${{ env.tool-package }}
-        $filename = Get-ChildItem -name ${{steps.download_conda.outputs.download-path}}\*.conda
-        conda install -q -y -c conda-forge ${{steps.download_conda.outputs.download-path}}\$filename
-        pushd nionui_app_test
-        python -m pip install .
-        popd
-        echo "Running test..."
-        conda list
-        ${{ env.tool-exe }} nionui_app.test_ack
-        ${{ env.tool-exe }} nionui_app.test_ack | grep ACK
-        conda deactivate
-    - name: Build/publish anaconda package
-      if: github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags') && matrix.os == 'windows-2022'
-      shell: bash -l {0}
-      run: |
-        # make a directory to avoid name conflicts with the channel. argh.
-        mkdir conda_build
-        pushd conda_build
-        conda create -n upload-env -q conda-build anaconda-client -y
-        conda activate upload-env
-        FILENAME=$(find '${{steps.download_conda.outputs.download-path}}' -name "*.conda")
-        echo "Send to Anaconda '$FILENAME'"
-        anaconda --token ${{ secrets.anaconda_token }} upload --user nion --skip-existing $FILENAME
-        conda deactivate
-        popd
   pypi-publish:
     name: Upload release to PyPI
     needs: [test_linux, test_macos, test_win]
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags')
     environment:
       name: release
       url: https://pypi.org/p/nionswift-tool
@@ -726,15 +445,19 @@ jobs:
       id-token: write  # IMPORTANT: this permission is mandatory for trusted publishing
     steps:
     - name: Download All Artifacts
-      uses: actions/download-artifact@v4
-    - name: Remove all the files except the ones to upload to PyPI.
+      uses: actions/download-artifact@v8
+      with:
+        merge-multiple: true
+        skip-decompress: true
+        path: dist
+    - name: Show contents of dist and remove non-wheel files
       shell: bash
       run: |
-        mkdir dist
-        find . -name "*cp312*.whl" -exec cp {} dist \;
+        find dist -type f -not -name "*.whl" -delete
         ls -Rl .
     - name: Publish package distributions to PyPI
       uses: pypa/gh-action-pypi-publish@release/v1
+      if: github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags')
       with:
         skip-existing: true
         print-hash: true

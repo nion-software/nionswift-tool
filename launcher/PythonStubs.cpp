@@ -20,6 +20,7 @@ void *LOOKUP_SYMBOL(void *h, const char *proc)
 #pragma push_macro("_DEBUG")
 #undef _DEBUG
 #define PY_SSIZE_T_CLEAN
+#define Py_LIMITED_API 0x03120000 // Target Python 3.12 and later
 #include <Python.h>
 #pragma pop_macro("_DEBUG")
 
@@ -53,13 +54,14 @@ typedef void (*PyGILState_ReleaseFn)(PyGILState_STATE);
 typedef int (*PyImport_AppendInittabFn)(const char *name, PyImport_AppendInittabInitFn initfunc);
 typedef PyObject* (*PyImport_GetModuleDictFn)();
 typedef PyObject* (*PyImport_ImportModuleFn)(const char *name);
+typedef void (*Py_DecRefFn)(PyObject *o);
+typedef void (*Py_IncRefFn)(PyObject *o);
 typedef int (*PyList_AppendFn)(PyObject *list, PyObject *item);
 typedef PyObject* (*PyList_GetItemFn)(PyObject *list, Py_ssize_t index);
 typedef int (*PyList_InsertFn)(PyObject *list, Py_ssize_t index, PyObject *item);
 typedef PyObject* (*PyList_NewFn)(Py_ssize_t len);
 typedef Py_ssize_t (*PyList_SizeFn)(PyObject *list);
 typedef long (*PyLong_AsLongFn)(PyObject *obj);
-typedef PY_LONG_LONG (*PyLong_AsLongLongFn)(PyObject *obj);
 typedef PyObject* (*PyLong_FromLongFn)(long v);
 typedef PyObject* (*PyLong_FromLongLongFn)(PY_LONG_LONG v);
 typedef PyObject* (*PyLong_FromUnsignedLongFn)(unsigned long v);
@@ -76,9 +78,12 @@ typedef int (*PyObject_GetBufferFn)(PyObject *o, Py_buffer *view, int flags);
 typedef int (*PyObject_HasAttrStringFn)(PyObject *o, const char *attr_name);
 typedef int (*PyObject_IsTrueFn)(PyObject *o);
 typedef int (*PyObject_SetAttrFn)(PyObject *o, PyObject *attr_name, PyObject *v);
+typedef PyTypeObject* (*PyObject_TypeFn)(PyObject *o);
 typedef PyObject* (*PyRun_SimpleStringFn)(const char *str);
-typedef PyObject* (*PyRun_StringFlagsFn)(const char *str, int start, PyObject *globals, PyObject *locals, PyCompilerFlags *flags);
+typedef int (*PyDict_CheckFn)(PyObject *o);
+typedef int (*PyList_CheckFn)(PyObject *o);
 typedef int (*PySequence_CheckFn)(PyObject *o);
+typedef int (*PyTuple_CheckFn)(PyObject *o);
 typedef PyObject* (*PySequence_GetItemFn)(PyObject *o, Py_ssize_t i);
 typedef Py_ssize_t (*PySequence_SizeFn)(PyObject *o);
 typedef int (*PyState_AddModuleFn)(PyObject *module, PyModuleDef *def);
@@ -91,7 +96,6 @@ typedef PyObject* (*PyUnicode_DecodeUTF16Fn)(const char *s, Py_ssize_t size, con
 typedef PyObject *(*PyUnicode_FromStringFn)(const char *u);
 typedef wchar_t *(*PyUnicode_AsWideCharStringFn)(PyObject *unicode, Py_ssize_t *size);
 typedef void (*PyMem_FreeFn)(void *p);
-typedef PyObject* (*Py_CompileStringExFlagsFn)(const char *str, const char *filename, int start, PyCompilerFlags *flags, int optimize);
 typedef void (*Py_InitializeFn)();
 typedef void (*Py_FinalizeFn)();
 typedef void(*Py_SetPythonHomeFn)(wchar_t *ph);
@@ -121,6 +125,8 @@ static PyFloat_FromDoubleFn fFloat_FromDouble = 0;
 static PyGILState_EnsureFn fGILState_Ensure = 0;
 static PyGILState_CheckFn fGILState_Check = 0;
 static PyGILState_ReleaseFn fGILState_Release = 0;
+static Py_DecRefFn fPy_DecRef = 0;
+static Py_IncRefFn fPy_IncRef = 0;
 static PyImport_AppendInittabFn fImport_AppendInittab = 0;
 static PyImport_GetModuleDictFn fImport_GetModuleDict = 0;
 static PyImport_ImportModuleFn fImport_ImportModule = 0;
@@ -130,7 +136,6 @@ static PyList_InsertFn fList_Insert = 0;
 static PyList_NewFn fList_New = 0;
 static PyList_SizeFn fList_Size = 0;
 static PyLong_AsLongFn fLong_AsLong = 0;
-static PyLong_AsLongLongFn fLong_AsLongLong = 0;
 static PyLong_FromLongFn fLong_FromLong = 0;
 static PyLong_FromLongLongFn fLong_FromLongLong = 0;
 static PyLong_FromUnsignedLongFn fLong_FromUnsignedLong = 0;
@@ -147,8 +152,8 @@ static PyObject_GetBufferFn fObject_GetBuffer = 0;
 static PyObject_HasAttrStringFn fObject_HasAttrString = 0;
 static PyObject_IsTrueFn fObject_IsTrue = 0;
 static PyObject_SetAttrFn fObject_SetAttr = 0;
+static PyObject_TypeFn fObject_Type = 0;
 static PyRun_SimpleStringFn fRun_SimpleString = 0;
-static PyRun_StringFlagsFn fRun_StringFlags = 0;
 static PySequence_CheckFn fSequence_Check = 0;
 static PySequence_GetItemFn fSequence_GetItem = 0;
 static PySequence_SizeFn fSequence_Size = 0;
@@ -162,7 +167,6 @@ static PyUnicode_DecodeUTF16Fn fUnicode_DecodeUTF16 = 0;
 static PyUnicode_FromStringFn fUnicode_FromString = 0;
 static PyUnicode_AsWideCharStringFn fUnicode_AsWideCharString = 0;
 static PyMem_FreeFn fMem_Free = 0;
-static Py_CompileStringExFlagsFn fCompileStringExFlags = 0;
 static Py_InitializeFn fInitialize = 0;
 static Py_FinalizeFn fFinalize = 0;
 static Py_SetPythonHomeFn fSetPythonHome = 0;
@@ -210,7 +214,6 @@ void deinitialize_pylib()
     fList_New = 0;
     fList_Size = 0;
     fLong_AsLong = 0;
-    fLong_AsLongLong = 0;
     fLong_FromLong = 0;
     fLong_FromLongLong = 0;
     fLong_FromUnsignedLong = 0;
@@ -227,8 +230,8 @@ void deinitialize_pylib()
     fObject_HasAttrString = 0;
     fObject_IsTrue = 0;
     fObject_SetAttr = 0;
+    fObject_Type = 0;
     fRun_SimpleString = 0;
-    fRun_StringFlags = 0;
     fSequence_Check = 0;
     fSequence_GetItem = 0;
     fSequence_Size = 0;
@@ -240,16 +243,25 @@ void deinitialize_pylib()
     fUnicode_AsUTF8 = 0;
     fUnicode_DecodeUTF16 = 0;
     fUnicode_FromString = 0;
-    fCompileStringExFlags = 0;
     fInitialize = 0;
     fFinalize = 0;
     fSetPythonHome = 0;
 }
 
+PyTypeObject *GetObjectType(PyObject *o)
+{
+    if (fObject_Type == 0)
+        fObject_Type = (PyObject_TypeFn)LOOKUP_SYMBOL(pylib, "PyObject_Type");
+    return fObject_Type(o);
+}
+
 bool DPyBool_Check(PyObject *o)
 {
     PyTypeObject *DPyBool_Type = (PyTypeObject *)LOOKUP_SYMBOL(pylib, "PyBool_Type");
-    return Py_TYPE(o) == DPyBool_Type;
+    PyTypeObject *obj_type = (PyTypeObject*)GetObjectType(o);
+    auto is_subtype = CALL_PY(PyType_IsSubtype)(obj_type, DPyBool_Type);
+    CALL_PY(Py_DecRef)((PyObject *)obj_type);
+    return is_subtype;
 }
 
 bool DPyCapsule_CheckExact(PyObject *o)
@@ -261,13 +273,34 @@ bool DPyCapsule_CheckExact(PyObject *o)
 bool DPyFloat_Check(PyObject *o)
 {
     PyTypeObject *DPyFloat_Type = (PyTypeObject *)LOOKUP_SYMBOL(pylib, "PyFloat_Type");
-    return Py_TYPE(o) == DPyFloat_Type;
+    PyTypeObject *obj_type = (PyTypeObject*)GetObjectType(o);
+    auto is_subtype = CALL_PY(PyType_IsSubtype)(obj_type, DPyFloat_Type);
+    CALL_PY(Py_DecRef)((PyObject *)obj_type);
+    return is_subtype;
+}
+
+bool DPyLong_Check(PyObject *o)
+{
+    PyTypeObject *DPyLong_Type = (PyTypeObject *)LOOKUP_SYMBOL(pylib, "PyLong_Type");
+    PyTypeObject *obj_type = (PyTypeObject*)GetObjectType(o);
+    auto is_subtype = CALL_PY(PyType_IsSubtype)(obj_type, DPyLong_Type);
+    CALL_PY(Py_DecRef)((PyObject *)obj_type);
+    return is_subtype;
 }
 
 bool DPyModule_Check(PyObject *o)
 {
     PyTypeObject *DPyModule_Type = (PyTypeObject *)LOOKUP_SYMBOL(pylib, "PyModule_Type");
     return Py_TYPE(o) == DPyModule_Type;
+}
+
+bool DPyUnicode_Check(PyObject *o)
+{
+    PyTypeObject *DPyUnicode_Type = (PyTypeObject *)LOOKUP_SYMBOL(pylib, "PyUnicode_Type");
+    PyTypeObject *obj_type = (PyTypeObject*)GetObjectType(o);
+    auto is_subtype = CALL_PY(PyType_IsSubtype)(obj_type, DPyUnicode_Type);
+    CALL_PY(Py_DecRef)((PyObject *)obj_type);
+    return is_subtype;
 }
 
 PyObject *DPyExc_GetAttributeError()
@@ -487,6 +520,20 @@ PyObject* DPyImport_ImportModule(const char *name)
     return fImport_ImportModule(name);
 }
 
+void DPy_DecRef(PyObject *o)
+{
+    if (fPy_DecRef == 0)
+        fPy_DecRef = (Py_DecRefFn)LOOKUP_SYMBOL(pylib, "Py_DecRef");
+    fPy_DecRef(o);
+}
+
+void DPy_IncRef(PyObject *o)
+{
+    if (fPy_IncRef == 0)
+        fPy_IncRef = (Py_IncRefFn)LOOKUP_SYMBOL(pylib, "Py_IncRef");
+    fPy_IncRef(o);
+}
+
 int DPyList_Append(PyObject *list, PyObject *item)
 {
     if (fList_Append == 0)
@@ -527,13 +574,6 @@ long DPyLong_AsLong(PyObject *obj)
     if (fLong_AsLong == 0)
         fLong_AsLong = (PyLong_AsLongFn)LOOKUP_SYMBOL(pylib, "PyLong_AsLong");
     return fLong_AsLong(obj);
-}
-
-PY_LONG_LONG DPyLong_AsLongLong(PyObject *obj)
-{
-    if (fLong_AsLongLong == 0)
-        fLong_AsLongLong = (PyLong_AsLongLongFn)LOOKUP_SYMBOL(pylib, "PyLong_AsLongLong");
-    return fLong_AsLongLong(obj);
 }
 
 PyObject* DPyLong_FromLong(long v)
@@ -655,11 +695,22 @@ PyObject* DPyRun_SimpleString(const char *str)
     return fRun_SimpleString(str);
 }
 
-PyObject* DPyRun_StringFlags(const char *str, int start, PyObject *globals, PyObject *locals, PyCompilerFlags *flags)
+int DPyDict_Check(PyObject *o)
 {
-    if (fRun_StringFlags == 0)
-        fRun_StringFlags = (PyRun_StringFlagsFn)LOOKUP_SYMBOL(pylib, "PyRun_StringFlags");
-    return fRun_StringFlags(str, start, globals, locals, flags);
+    PyTypeObject *DPyDict_Type = (PyTypeObject *)LOOKUP_SYMBOL(pylib, "PyDict_Type");
+    PyTypeObject *obj_type = (PyTypeObject*)GetObjectType(o);
+    auto is_subtype = CALL_PY(PyType_IsSubtype)(obj_type, DPyDict_Type);
+    CALL_PY(Py_DecRef)((PyObject *)obj_type);
+    return is_subtype;
+}
+
+int DPyList_Check(PyObject *o)
+{
+    PyTypeObject *DPyList_Type = (PyTypeObject *)LOOKUP_SYMBOL(pylib, "PyList_Type");
+    PyTypeObject *obj_type = (PyTypeObject*)GetObjectType(o);
+    auto is_subtype = CALL_PY(PyType_IsSubtype)(obj_type, DPyList_Type);
+    CALL_PY(Py_DecRef)((PyObject *)obj_type);
+    return is_subtype;
 }
 
 int DPySequence_Check(PyObject *o)
@@ -667,6 +718,15 @@ int DPySequence_Check(PyObject *o)
     if (fSequence_Check == 0)
         fSequence_Check = (PySequence_CheckFn)LOOKUP_SYMBOL(pylib, "PySequence_Check");
     return fSequence_Check(o);
+}
+
+int DPyTuple_Check(PyObject *o)
+{
+    PyTypeObject *DPyTuple_Type = (PyTypeObject *)LOOKUP_SYMBOL(pylib, "PyTuple_Type");
+    PyTypeObject *obj_type = (PyTypeObject*)GetObjectType(o);
+    auto is_subtype = CALL_PY(PyType_IsSubtype)(obj_type, DPyTuple_Type);
+    CALL_PY(Py_DecRef)((PyObject *)obj_type);
+    return is_subtype;
 }
 
 PyObject* DPySequence_GetItem(PyObject *o, Py_ssize_t i)
@@ -751,13 +811,6 @@ void DPyMem_Free(void *p)
     if (fMem_Free == 0)
         fMem_Free = (PyMem_FreeFn)LOOKUP_SYMBOL(pylib, "PyMem_Free");
     fMem_Free(p);
-}
-
-PyObject* DPy_CompileStringExFlags(const char *str, const char *filename, int start, PyCompilerFlags *flags, int optimize)
-{
-    if (fCompileStringExFlags == 0)
-        fCompileStringExFlags = (Py_CompileStringExFlagsFn)LOOKUP_SYMBOL(pylib, "Py_CompileStringExFlags");
-    return fCompileStringExFlags(str, filename, start, flags, optimize);
 }
 
 void DPy_Initialize()

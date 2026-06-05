@@ -9,7 +9,7 @@ import typing
 tool_id = "nionswift"
 launcher = "NionSwiftLauncher"
 
-version = "5.2.0"
+version = "5.3.0"
 
 
 def package_files(directory: str, prefix: str, prefix_drop: int) -> list[typing.Tuple[str, list[str]]]:
@@ -52,41 +52,39 @@ import packaging
 # this class overrides some methods of bdist_wheel to avoid its stricter tag checks.
 class bdist_wheel(bdist_wheel_.bdist_wheel):
     def get_tag(self) -> typing.Tuple[str, str, str]:
-        # cp310.cp311.cp312-abi3-manylinux1_x86_64.whl
-        # cp310.cp311.cp312-abi3-macosx_11_0_intel.whl
-        # cp310.cp311.cp312-abi3-macosx_11_0_arm64.whl
-        # cp310.cp311.cp312-none-win_amd64.whl
         global python_tag, abi_tag, platform_tag
         return python_tag, abi_tag, platform_tag
 
 
-python_tag = str()
-abi_tag = str()
+def is_arm64() -> bool:
+    machine = platform.machine().lower()
+    # 'aarch64' is common on Linux/Android
+    # 'arm64' is common on macOS (Apple Silicon) and Windows
+    return machine in ['arm64', 'aarch64']
+
+
+python_tag = "cp312"  # minimum version
+abi_tag = "abi3"
 platform_tag = str()
 dest = None
 dir_path = None
 dest_drop = None
 
+
 if sys.platform == "darwin":
-    python_tag = "cp312.cp313.cp314"
-    abi_tag = "abi3"
     platform_tag = sysconfig.get_platform().replace("-", "_").replace(".", "_")
     dest = "bin"
     dir_path = "launcher/build/Release"
     dest_drop = 3
 if sys.platform == "win32":
-    python_tag = "cp312.cp313.cp314"
-    abi_tag = "none"
-    platform_tag = "win_amd64"
+    platform_tag = "win_amd64" if not is_arm64() else "win_arm64"
     dest = f"Scripts/{launcher}"
-    dir_path = "launcher/x64/Release"
+    dir_path = "launcher/x64/Release" if not is_arm64() else "launcher/arm64/Release"
     dest_drop = 3
 if sys.platform == "linux":
-    python_tag = "cp312.cp313.cp314"
-    abi_tag = "abi3"
-    platform_tag = "manylinux1_x86_64"
+    platform_tag = "manylinux_2_28_x86_64" if not is_arm64() else "manylinux_2_28_aarch64"
     dest = f"bin/{launcher}"
-    dir_path = "launcher/linux/x64"
+    dir_path = "launcher/linux/x64" if not is_arm64() else "launcher/linux/arm64"
     dest_drop = 3
 
 data_files = package_files(dir_path, dest, dest_drop)
